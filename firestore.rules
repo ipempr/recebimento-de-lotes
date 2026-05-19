@@ -26,17 +26,20 @@ service cloud.firestore {
 
     match /pacs/{pacId} {
       allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && isValidConfig(request.resource.data);
+      allow create, update: if isAuthenticated() && isValidConfig(request.resource.data);
+      allow delete: if isAuthenticated();
     }
 
     match /collaborators/{collaboratorId} {
       allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && isValidConfig(request.resource.data);
+      allow create, update: if isAuthenticated() && isValidConfig(request.resource.data);
+      allow delete: if isAuthenticated();
     }
 
     match /statuses/{statusId} {
       allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && isValidConfig(request.resource.data);
+      allow create, update: if isAuthenticated() && isValidConfig(request.resource.data);
+      allow delete: if isAuthenticated();
     }
   }
 }

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   collection, 
   onSnapshot, 
@@ -48,7 +48,8 @@ import {
   FileSpreadsheet,
   Download,
   Upload,
-  Loader2
+  Loader2,
+  ChevronDown
 } from 'lucide-react';
 import { format, addDays, differenceInDays, isAfter, isBefore, startOfDay, parse } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -175,19 +176,19 @@ export default function App() {
     );
 
     const unsubPacs = onSnapshot(
-      collection(db, 'pacs'),
+      query(collection(db, 'pacs'), orderBy('name')),
       (snapshot) => setPacs(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ConfigItem))),
       (err) => handleFirestoreError(err, OperationType.LIST, 'pacs')
     );
 
     const unsubCollabs = onSnapshot(
-      collection(db, 'collaborators'),
+      query(collection(db, 'collaborators'), orderBy('name')),
       (snapshot) => setCollaborators(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ConfigItem))),
       (err) => handleFirestoreError(err, OperationType.LIST, 'collaborators')
     );
 
     const unsubStatuses = onSnapshot(
-      collection(db, 'statuses'),
+      query(collection(db, 'statuses'), orderBy('name')),
       (snapshot) => setStatuses(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ConfigItem))),
       (err) => handleFirestoreError(err, OperationType.LIST, 'statuses')
     );
@@ -307,7 +308,7 @@ export default function App() {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#f5f5f0] p-4">
         <div className="max-w-md w-full bg-white rounded-[32px] p-12 shadow-xl text-center">
-          <h1 className="text-4xl font-serif mb-6 text-[#1a1a1a]">Gestão de Lotes</h1>
+          <h1 className="text-4xl font-display font-bold tracking-tight mb-6 text-[#1a1a1a]">Gestão de Lotes</h1>
           <p className="text-[#5A5A40] mb-8">Acesse com sua conta Google para gerenciar os ensaios.</p>
           <button 
             onClick={handleLogin}
@@ -327,7 +328,7 @@ export default function App() {
       <header className="bg-white border-b border-[#e5e5e0] sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
           <div className="flex items-center gap-8">
-            <h1 className="text-2xl font-serif font-bold">Lotes Ensaio</h1>
+            <h1 className="text-2xl font-display font-bold tracking-tight">Lotes Ensaio</h1>
             <nav className="flex gap-1">
               <button 
                 onClick={() => setActiveTab('dashboard')}
@@ -543,7 +544,7 @@ function ConfirmModal({ title, message, onConfirm, onCancel }: any) {
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
       <div className="bg-white w-full max-w-md rounded-[32px] shadow-2xl p-8 animate-in fade-in zoom-in duration-200">
-        <h3 className="text-xl font-serif font-bold mb-4">{title}</h3>
+        <h3 className="text-xl font-display font-bold tracking-tight mb-4">{title}</h3>
         <p className="text-[#5A5A40] mb-8">{message}</p>
         <div className="flex gap-3">
           <button 
@@ -588,7 +589,7 @@ function BatchCard({ batch, onEdit, onDelete }: any) {
             <div className="flex items-center gap-3">
               <div>
                 <span className="text-xs font-bold uppercase tracking-wider text-[#5A5A40] opacity-60">PAC</span>
-                <h3 className="text-xl font-bold">{batch.pac}</h3>
+                <h3 className="text-xl font-display font-bold tracking-tight">{batch.pac}</h3>
               </div>
               {isOverdue && (
                 <span className="flex items-center gap-1 text-xs font-bold text-red-600 bg-red-100 px-2 py-1 rounded-lg">
@@ -672,6 +673,91 @@ function WorkflowStep({ label, user, date }: { label: string, user?: string, dat
   );
 }
 
+function SearchableSelect({ label, value, options, onChange, placeholder, required }: any) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const filteredOptions = useMemo(() => {
+    return options.filter((opt: any) => 
+      opt.name.toLowerCase().includes(search.toLowerCase())
+    );
+  }, [options, search]);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const selectedOption = options.find((opt: any) => opt.name === value);
+
+  return (
+    <div className="space-y-2 relative" ref={containerRef}>
+      <label className="text-xs font-bold uppercase text-[#5A5A40]">{label}</label>
+      <div 
+        className="relative cursor-pointer"
+        onClick={() => setIsOpen(!isOpen)}
+      >
+        <div className="w-full p-3 bg-[#f5f5f0] border-none rounded-xl focus-within:ring-2 focus-within:ring-[#5A5A40]/20 flex items-center justify-between">
+          <span className={cn("text-sm", !value && "text-[#5A5A40]/50")}>
+            {value || placeholder}
+          </span>
+          <ChevronDown size={18} className={cn("text-[#5A5A40]/50 transition-transform", isOpen && "rotate-180")} />
+        </div>
+      </div>
+
+      {isOpen && (
+        <div className="absolute z-50 w-full mt-1 bg-white border border-[#e5e5e0] rounded-xl shadow-xl overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className="p-2 border-b border-[#e5e5e0] sticky top-0 bg-white">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#5A5A40]/40" size={14} />
+              <input 
+                type="text"
+                autoFocus
+                className="w-full pl-9 pr-3 py-2 bg-[#f5f5f0] border-none rounded-lg text-sm focus:outline-none"
+                placeholder="Buscar..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                onClick={(e) => e.stopPropagation()}
+              />
+            </div>
+          </div>
+          <div className="max-h-60 overflow-y-auto">
+            {filteredOptions.length > 0 ? (
+              filteredOptions.map((opt: any) => (
+                <div 
+                  key={opt.id}
+                  className={cn(
+                    "px-4 py-2 text-sm hover:bg-[#f5f5f0] cursor-pointer transition-colors",
+                    value === opt.name && "bg-[#5A5A40]/5 font-bold text-[#5A5A40]"
+                  )}
+                  onClick={() => {
+                    onChange(opt.name);
+                    setIsOpen(false);
+                    setSearch('');
+                  }}
+                >
+                  {opt.name}
+                </div>
+              ))
+            ) : (
+              <div className="px-4 py-3 text-sm text-[#5A5A40]/50 italic">
+                Nenhum resultado encontrado
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+      <input type="hidden" required={required} value={value} />
+    </div>
+  );
+}
+
 function BatchModal({ isOpen, onClose, batch, pacs, collaborators, statuses, handleFirestoreError }: any) {
   const [localError, setLocalError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
@@ -722,7 +808,7 @@ function BatchModal({ isOpen, onClose, batch, pacs, collaborators, statuses, han
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
       <div className="bg-white w-full max-w-2xl rounded-[32px] shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
         <div className="p-8 border-b border-[#e5e5e0] flex items-center justify-between">
-          <h2 className="text-2xl font-serif font-bold">{batch ? 'Editar Lote' : 'Receber Novo Lote'}</h2>
+          <h2 className="text-2xl font-display font-bold tracking-tight">{batch ? 'Editar Lote' : 'Receber Novo Lote'}</h2>
           <button onClick={onClose} className="p-2 hover:bg-[#f5f5f0] rounded-full"><X size={24} /></button>
         </div>
         
@@ -737,18 +823,14 @@ function BatchModal({ isOpen, onClose, batch, pacs, collaborators, statuses, han
             </div>
           )}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="space-y-2">
-              <label className="text-xs font-bold uppercase text-[#5A5A40]">PAC</label>
-              <select 
-                required
-                className="w-full p-3 bg-[#f5f5f0] border-none rounded-xl focus:ring-2 focus:ring-[#5A5A40]/20"
-                value={formData.pac}
-                onChange={e => setFormData({...formData, pac: e.target.value})}
-              >
-                <option value="">Selecionar PAC</option>
-                {pacs.map((p: any) => <option key={p.id} value={p.name}>{p.name}</option>)}
-              </select>
-            </div>
+            <SearchableSelect 
+              label="PAC"
+              value={formData.pac}
+              options={pacs}
+              onChange={(val: string) => setFormData({...formData, pac: val})}
+              placeholder="Selecionar PAC"
+              required
+            />
 
             <div className="space-y-2">
               <label className="text-xs font-bold uppercase text-[#5A5A40]">Status</label>
@@ -1135,7 +1217,7 @@ function ConfigPanel({ pacs, collaborators, statuses, handleFirestoreError, onUp
       {activeConfig === 'import' ? (
         <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-300">
           <div className="bg-[#f5f5f0] p-6 rounded-2xl border border-dashed border-[#5A5A40]/20">
-            <h4 className="font-serif font-bold text-lg mb-2">Importar de Planilha</h4>
+            <h4 className="font-display font-bold tracking-tight text-lg mb-2">Importar de Planilha</h4>
               <p className="text-sm text-[#5A5A40]/70 mb-6">
                 Carregue seus dados iniciais via link do OneDrive ou arquivo local (.xlsx, .xls, .csv).
                 O sistema irá ler <strong>somente a aba nomeada como "PRODUÇÃO"</strong>.
@@ -1321,7 +1403,7 @@ function StatsPanel({ stats }: { stats: any }) {
         <div className="lg:col-span-2 bg-white rounded-[32px] p-8 border border-[#e5e5e0]">
           <div className="flex items-center gap-3 mb-6">
             <BarChart3 className="text-[#5A5A40]" size={24} />
-            <h3 className="text-xl font-serif font-bold">Produtividade por Atividade</h3>
+            <h3 className="text-xl font-display font-bold tracking-tight">Produtividade por Atividade</h3>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left">
@@ -1360,7 +1442,7 @@ function StatsPanel({ stats }: { stats: any }) {
         <div className="bg-white rounded-[32px] p-8 border border-[#e5e5e0]">
           <div className="flex items-center gap-3 mb-6">
             <History className="text-[#5A5A40]" size={24} />
-            <h3 className="text-xl font-serif font-bold">Qualidade de Entrega</h3>
+            <h3 className="text-xl font-display font-bold tracking-tight">Qualidade de Entrega</h3>
           </div>
           <div className="flex flex-col items-center justify-center h-48">
             <div className="relative w-32 h-32">
