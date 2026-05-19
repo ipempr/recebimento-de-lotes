@@ -100,7 +100,58 @@ interface ConfigItem {
   color?: string;
 }
 
+class LocalTimestamp {
+  seconds: number;
+  nanoseconds: number;
+  constructor(seconds: number, nanoseconds: number) {
+    this.seconds = seconds;
+    this.nanoseconds = nanoseconds;
+  }
+  toDate() {
+    return new Date(this.seconds * 1000);
+  }
+  toMillis() {
+    return this.seconds * 1000;
+  }
+  isEqual(other: any) {
+    return other && other.seconds === this.seconds && other.nanoseconds === this.nanoseconds;
+  }
+  toJSON() {
+    return { seconds: this.seconds, nanoseconds: this.nanoseconds, type: 'timestamp' };
+  }
+  valueOf() {
+    return `Timestamp(seconds=${this.seconds}, nanoseconds=${this.nanoseconds})`;
+  }
+  static now() {
+    return new LocalTimestamp(Math.floor(Date.now() / 1000), 0);
+  }
+  static fromDate(date: Date) {
+    return new LocalTimestamp(Math.floor(date.getTime() / 1000), 0);
+  }
+  static fromMillis(ms: number) {
+    return new LocalTimestamp(Math.floor(ms / 1000), 0);
+  }
+}
+
+function parseLocalTimestamp(raw: any): any {
+  if (!raw) return null;
+  if (typeof raw.toDate === 'function') return raw;
+  if (typeof raw === 'object' && raw.seconds !== undefined) {
+    return new LocalTimestamp(raw.seconds, raw.nanoseconds || 0);
+  }
+  if (typeof raw === 'string') {
+    return LocalTimestamp.fromDate(new Date(raw));
+  }
+  if (typeof raw === 'number') {
+    return LocalTimestamp.fromMillis(raw);
+  }
+  return LocalTimestamp.now();
+}
+
 export default function App() {
+  const [isLocalMode, setIsLocalMode] = useState(() => {
+    return localStorage.getItem('lotes_isLocalMode') === 'true';
+  });
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [batches, setBatches] = useState<Batch[]>([]);
@@ -135,28 +186,167 @@ export default function App() {
 
   // Auth
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setUser(user);
+    const isLocal = localStorage.getItem('lotes_isLocalMode') === 'true';
+    if (isLocal) {
+      setUser({
+        uid: 'client-demo',
+        email: 'demo@ipempr.org',
+        displayName: 'Convidado Local',
+        emailVerified: true
+      } as any);
       setLoading(false);
-    });
-    return () => unsubscribe();
+      setIsLocalMode(true);
+    } else {
+      const unsubscribe = onAuthStateChanged(auth, (user) => {
+        setUser(user);
+        setLoading(false);
+      });
+      return () => unsubscribe();
+    }
   }, []);
 
   const handleLogin = async () => {
     try {
       const provider = new GoogleAuthProvider();
       await signInWithPopup(auth, provider);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      setError('Falha no login');
+      setError(`Falha no login com Google: ${err.message || err}. Você também pode utilizar o Acesso Demonstrativo Local.`);
     }
   };
 
-  const handleLogout = () => signOut(auth);
+  const handleLocalLogin = () => {
+    setIsLocalMode(true);
+    localStorage.setItem('lotes_isLocalMode', 'true');
+    setUser({
+      uid: 'client-demo',
+      email: 'demo@ipempr.org',
+      displayName: 'Convidado Local',
+      emailVerified: true
+    } as any);
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('lotes_isLocalMode');
+    setIsLocalMode(false);
+    signOut(auth);
+    setUser(null);
+  };
 
   // Data Fetching
   useEffect(() => {
     if (!user) return;
+
+    if (isLocalMode) {
+      // Offline Local Mode
+      const savedBatches = localStorage.getItem('lotes_batches');
+      const savedPacs = localStorage.getItem('lotes_pacs');
+      const savedCollabs = localStorage.getItem('lotes_collaborators');
+      const savedStatuses = localStorage.getItem('lotes_statuses');
+
+      let initialBatches: Batch[] = [];
+      let initialPacs: ConfigItem[] = [];
+      let initialCollabs: ConfigItem[] = [];
+      let initialStatuses: ConfigItem[] = [];
+
+      if (savedPacs) {
+        initialPacs = JSON.parse(savedPacs);
+      } else {
+        initialPacs = [
+          { id: 'p1', name: 'PAC 01 - Araucária' },
+          { id: 'p2', name: 'PAC 02 - Cascavel' },
+          { id: 'p3', name: 'PAC 03 - Curitiba' },
+          { id: 'p4', name: 'PAC 04 - Foz do Iguaçu' },
+          { id: 'p5', name: 'PAC 05 - Londrina' },
+          { id: 'p6', name: 'PAC 06 - Maringá' },
+          { id: 'p7', name: 'PAC 07 - Ponta Grossa' }
+        ];
+        localStorage.setItem('lotes_pacs', JSON.stringify(initialPacs));
+      }
+
+      if (savedCollabs) {
+        initialCollabs = JSON.parse(savedCollabs);
+      } else {
+        initialCollabs = [
+          { id: 'c1', name: 'Ana Souza' },
+          { id: 'c2', name: 'Carlos Lima' },
+          { id: 'c3', name: 'Gabriel Ramos' },
+          { id: 'c4', name: 'Mariana Santos' },
+          { id: 'c5', name: 'Paulo Henrique' },
+          { id: 'c6', name: 'Renata Costa' }
+        ];
+        localStorage.setItem('lotes_collaborators', JSON.stringify(initialCollabs));
+      }
+
+      if (savedStatuses) {
+        initialStatuses = JSON.parse(savedStatuses);
+      } else {
+        initialStatuses = [
+          { id: 's1', name: 'ABERTO' },
+          { id: 's2', name: 'ALERTA' },
+          { id: 's3', name: 'ATRASO' },
+          { id: 's4', name: 'EM ANDAMENTO' },
+          { id: 's5', name: 'FINALIZADO' }
+        ];
+        localStorage.setItem('lotes_statuses', JSON.stringify(initialStatuses));
+      }
+
+      if (savedBatches) {
+        const raw = JSON.parse(savedBatches);
+        initialBatches = raw.map((b: any) => ({
+          ...b,
+          periodoInicial: parseLocalTimestamp(b.periodoInicial),
+          periodoFinal: parseLocalTimestamp(b.periodoFinal),
+          recebidoEm: parseLocalTimestamp(b.recebidoEm),
+          lidoEm: parseLocalTimestamp(b.lidoEm),
+          conferidoEm: parseLocalTimestamp(b.conferidoEm)
+        }));
+      } else {
+        initialBatches = [
+          {
+            id: 'b1',
+            pac: 'PAC 02 - Cascavel',
+            numEnsaios: 15,
+            status: 'FINALIZADO',
+            recebidoPor: 'Ana Souza',
+            recebidoEm: LocalTimestamp.fromMillis(Date.now() - 1000 * 60 * 60 * 24 * 15),
+            lidoPor: 'Ana Souza',
+            lidoEm: LocalTimestamp.fromMillis(Date.now() - 1000 * 60 * 60 * 24 * 12),
+            conferidoPor: 'Carlos Lima',
+            conferidoEm: LocalTimestamp.fromMillis(Date.now() - 1000 * 60 * 60 * 24 * 10),
+            periodoInicial: LocalTimestamp.fromMillis(Date.now() - 1000 * 60 * 60 * 24 * 25),
+            periodoFinal: LocalTimestamp.fromMillis(Date.now() - 1000 * 60 * 60 * 24 * 15)
+          },
+          {
+            id: 'b2',
+            pac: 'PAC 01 - Araucária',
+            numEnsaios: 8,
+            status: 'EM ANDAMENTO',
+            recebidoPor: 'Carlos Lima',
+            recebidoEm: LocalTimestamp.fromMillis(Date.now() - 1000 * 60 * 60 * 24 * 5),
+            periodoInicial: LocalTimestamp.fromMillis(Date.now() - 1000 * 60 * 60 * 24 * 10),
+            periodoFinal: LocalTimestamp.fromMillis(Date.now() - 1000 * 60 * 60 * 24 * 5)
+          },
+          {
+            id: 'b3',
+            pac: 'PAC 03 - Curitiba',
+            numEnsaios: 12,
+            status: 'ABERTO',
+            recebidoPor: 'Gabriel Ramos',
+            recebidoEm: LocalTimestamp.fromMillis(Date.now() - 1000 * 60 * 60 * 2),
+            periodoInicial: LocalTimestamp.fromMillis(Date.now() - 1000 * 60 * 60 * 24 * 2),
+            periodoFinal: LocalTimestamp.fromMillis(Date.now() - 1000 * 60 * 60 * 2)
+          }
+        ];
+        localStorage.setItem('lotes_batches', JSON.stringify(initialBatches));
+      }
+
+      setPacs(initialPacs.sort((a, b) => a.name.localeCompare(b.name)));
+      setCollaborators(initialCollabs.sort((a, b) => a.name.localeCompare(b.name)));
+      setStatuses(initialStatuses.sort((a, b) => a.name.localeCompare(b.name)));
+      setBatches(initialBatches);
+      return;
+    }
 
     const testConnection = async () => {
       try {
@@ -199,7 +389,7 @@ export default function App() {
       unsubCollabs();
       unsubStatuses();
     };
-  }, [user]);
+  }, [user, isLocalMode]);
 
   // Filtered Batches
   const filteredBatches = useMemo(() => {
@@ -280,6 +470,13 @@ export default function App() {
   }, [batches]);
 
   const handleDeleteBatch = async (id: string) => {
+    if (isLocalMode) {
+      const updated = batches.filter(b => b.id !== id);
+      setBatches(updated);
+      localStorage.setItem('lotes_batches', JSON.stringify(updated));
+      setBatchToDelete(null);
+      return;
+    }
     try {
       await deleteDoc(doc(db, 'batches', id));
       setBatchToDelete(null);
@@ -289,6 +486,22 @@ export default function App() {
   };
 
   const handleUpdateConfig = async (type: string, id: string, name: string) => {
+    if (isLocalMode) {
+      if (type === 'pacs') {
+        const updated = pacs.map(p => p.id === id ? { ...p, name } : p).sort((a, b) => a.name.localeCompare(b.name));
+        setPacs(updated);
+        localStorage.setItem('lotes_pacs', JSON.stringify(updated));
+      } else if (type === 'collaborators') {
+        const updated = collaborators.map(c => c.id === id ? { ...c, name } : c).sort((a, b) => a.name.localeCompare(b.name));
+        setCollaborators(updated);
+        localStorage.setItem('lotes_collaborators', JSON.stringify(updated));
+      } else if (type === 'statuses') {
+        const updated = statuses.map(s => s.id === id ? { ...s, name } : s).sort((a, b) => a.name.localeCompare(b.name));
+        setStatuses(updated);
+        localStorage.setItem('lotes_statuses', JSON.stringify(updated));
+      }
+      return;
+    }
     try {
       await updateDoc(doc(db, type, id), { name });
     } catch (error) {
@@ -308,15 +521,35 @@ export default function App() {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#f5f5f0] p-4">
         <div className="max-w-md w-full bg-white rounded-[32px] p-12 shadow-xl text-center">
-          <h1 className="text-4xl font-display font-bold tracking-tight mb-6 text-[#1a1a1a]">Gestão de Lotes</h1>
-          <p className="text-[#5A5A40] mb-8">Acesse com sua conta Google para gerenciar os ensaios.</p>
+          <h1 className="text-4xl font-display font-bold tracking-tight mb-4 text-[#1a1a1a]">Gestão de Lotes</h1>
+          <p className="text-[#5A5A40] mb-8 leading-relaxed">
+            Gerencie e acompanhe lotes de ensaios de modo rápido, prático e persistente.
+          </p>
+
           <button 
             onClick={handleLogin}
-            className="w-full bg-[#5A5A40] text-white rounded-full py-4 font-medium hover:bg-[#4a4a30] transition-colors flex items-center justify-center gap-3"
+            className="w-full bg-[#5A5A40] text-white rounded-full py-4 font-semibold hover:bg-[#4a4a30] transition-colors flex items-center justify-center gap-3 shadow-md mb-4 cursor-pointer"
           >
-            <img src="https://www.google.com/favicon.ico" className="w-5 h-5" alt="Google" />
+            <img src="https://www.google.com/favicon.ico" className="w-5 h-5 bg-white rounded-full p-0.5" alt="Google" />
             Entrar com Google
           </button>
+
+          <div className="relative flex py-4 items-center">
+            <div className="flex-grow border-t border-[#e5e5e0]"></div>
+            <span className="flex-shrink mx-4 text-[10px] text-[#5A5A40] opacity-50 uppercase font-bold tracking-wider">Ou</span>
+            <div className="flex-grow border-t border-[#e5e5e0]"></div>
+          </div>
+
+          <button 
+            onClick={handleLocalLogin}
+            className="w-full bg-white border border-[#5A5A40]/35 text-[#5A5A40] rounded-full py-4 font-semibold hover:bg-[#f0f0e5] transition-colors flex items-center justify-center gap-3 cursor-pointer shadow-sm"
+          >
+            Entrar em Modo Local (Demonstração)
+          </button>
+
+          <p className="text-[11px] text-[#5A5A40]/60 mt-6 leading-relaxed bg-[#f5f5f0] p-4 rounded-2xl border border-[#e5e5e0]">
+            💡 Se você estiver visualizando dentro do editor do AI Studio e os popups forem bloqueados pelo navegador, use o <strong>Modo Local</strong>. Os dados serão salvos de forma segura no seu navegador.
+          </p>
         </div>
       </div>
     );
@@ -494,6 +727,12 @@ export default function App() {
             handleFirestoreError={handleFirestoreError}
             onUpdate={handleUpdateConfig}
             setConfigToDelete={setConfigToDelete}
+            isLocalMode={isLocalMode}
+            batches={batches}
+            setBatches={setBatches}
+            setPacs={setPacs}
+            setCollaborators={setCollaborators}
+            setStatuses={setStatuses}
           />
         )}
       </main>
@@ -508,6 +747,18 @@ export default function App() {
             collaborators={collaborators}
             statuses={statuses}
             handleFirestoreError={handleFirestoreError}
+            isLocalMode={isLocalMode}
+            onSaveLocalBatch={(localBatch: any) => {
+              let updated;
+              if (editingBatch) {
+                updated = batches.map(b => b.id === editingBatch.id ? { ...b, ...localBatch } : b);
+              } else {
+                updated = [{ ...localBatch, id: 'local-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9) }, ...batches];
+              }
+              updated.sort((a, b) => b.recebidoEm.toDate().getTime() - a.recebidoEm.toDate().getTime());
+              setBatches(updated);
+              localStorage.setItem('lotes_batches', JSON.stringify(updated));
+            }}
           />
         )}
 
@@ -526,6 +777,23 @@ export default function App() {
             message="Tem certeza que deseja excluir este item das configurações?"
             onConfirm={async () => {
               const { type, id } = configToDelete;
+              if (isLocalMode) {
+                if (type === 'pacs') {
+                  const updated = pacs.filter(p => p.id !== id);
+                  setPacs(updated);
+                  localStorage.setItem('lotes_pacs', JSON.stringify(updated));
+                } else if (type === 'collaborators') {
+                  const updated = collaborators.filter(c => c.id !== id);
+                  setCollaborators(updated);
+                  localStorage.setItem('lotes_collaborators', JSON.stringify(updated));
+                } else if (type === 'statuses') {
+                  const updated = statuses.filter(s => s.id !== id);
+                  setStatuses(updated);
+                  localStorage.setItem('lotes_statuses', JSON.stringify(updated));
+                }
+                setConfigToDelete(null);
+                return;
+              }
               try {
                 await deleteDoc(doc(db, type, id));
                 setConfigToDelete(null);
@@ -758,7 +1026,7 @@ function SearchableSelect({ label, value, options, onChange, placeholder, requir
   );
 }
 
-function BatchModal({ isOpen, onClose, batch, pacs, collaborators, statuses, handleFirestoreError }: any) {
+function BatchModal({ isOpen, onClose, batch, pacs, collaborators, statuses, handleFirestoreError, isLocalMode, onSaveLocalBatch }: any) {
   const [localError, setLocalError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     pac: batch?.pac || '',
@@ -792,6 +1060,12 @@ function BatchModal({ isOpen, onClose, batch, pacs, collaborators, statuses, han
         lidoEm: formData.lidoPor && !batch?.lidoPor ? Timestamp.now() : (batch?.lidoEm || null),
         conferidoEm: formData.conferidoPor && !batch?.conferidoPor ? Timestamp.now() : (batch?.conferidoEm || null),
       };
+
+      if (isLocalMode) {
+        onSaveLocalBatch(data);
+        onClose();
+        return;
+      }
 
       if (batch) {
         await updateDoc(doc(db, 'batches', batch.id), data);
@@ -936,7 +1210,20 @@ function BatchModal({ isOpen, onClose, batch, pacs, collaborators, statuses, han
   );
 }
 
-function ConfigPanel({ pacs, collaborators, statuses, handleFirestoreError, onUpdate, setConfigToDelete }: any) {
+function ConfigPanel({ 
+  pacs, 
+  collaborators, 
+  statuses, 
+  handleFirestoreError, 
+  onUpdate, 
+  setConfigToDelete, 
+  isLocalMode, 
+  batches, 
+  setBatches, 
+  setPacs, 
+  setCollaborators, 
+  setStatuses 
+}: any) {
   const [activeConfig, setActiveConfig] = useState<'pacs' | 'collabs' | 'status' | 'import'>('pacs');
   const [newItemName, setNewItemName] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -985,6 +1272,8 @@ function ConfigPanel({ pacs, collaborators, statuses, handleFirestoreError, onUp
       }
 
       let importedCount = 0;
+      const importedLocalBatches: Batch[] = [];
+
       for (const row of data) {
         // Mapping columns based on user's specific headers (case-insensitive support)
         const getVal = (names: string[]) => {
@@ -1077,9 +1366,29 @@ function ConfigPanel({ pacs, collaborators, statuses, handleFirestoreError, onUp
         };
 
         if (batchData.pac) {
-          await addDoc(collection(db, 'batches'), batchData);
+          if (isLocalMode) {
+            const newId = 'local-imp-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9);
+            importedLocalBatches.push({ id: newId, ...batchData } as Batch);
+          } else {
+            await addDoc(collection(db, 'batches'), batchData);
+          }
           importedCount++;
         }
+      }
+
+      if (isLocalMode) {
+        // Enforce deserializing imported timestamps immediately for local mode
+        const finalizedLocalBatches = importedLocalBatches.map((b: any) => ({
+          ...b,
+          periodoInicial: parseLocalTimestamp(b.periodoInicial),
+          periodoFinal: parseLocalTimestamp(b.periodoFinal),
+          recebidoEm: parseLocalTimestamp(b.recebidoEm),
+          lidoEm: parseLocalTimestamp(b.lidoEm),
+          conferidoEm: parseLocalTimestamp(b.conferidoEm)
+        }));
+        const updated = [...finalizedLocalBatches, ...batches];
+        setBatches(updated);
+        localStorage.setItem('lotes_batches', JSON.stringify(updated));
       }
 
       if (importedCount === 0 && data.length > 0) {
@@ -1134,6 +1443,13 @@ function ConfigPanel({ pacs, collaborators, statuses, handleFirestoreError, onUp
   const handleDeleteAllBatches = async () => {
     setIsDeletingAll(true);
     try {
+      if (isLocalMode) {
+        setBatches([]);
+        localStorage.setItem('lotes_batches', JSON.stringify([]));
+        setImportStatus({ type: 'success', message: 'Todos os lotes foram excluídos com sucesso.' });
+        setShowDeleteAllConfirm(false);
+        return;
+      }
       const snapshot = await getDocs(collection(db, 'batches'));
       const batch = writeBatch(db);
       snapshot.docs.forEach((doc) => {
@@ -1152,6 +1468,27 @@ function ConfigPanel({ pacs, collaborators, statuses, handleFirestoreError, onUp
   const handleAdd = async () => {
     if (!newItemName) return;
     const collectionName = activeConfig === 'pacs' ? 'pacs' : activeConfig === 'collabs' ? 'collaborators' : 'statuses';
+    if (isLocalMode) {
+      const newItem = {
+        id: 'local-cfg-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9),
+        name: newItemName
+      };
+      if (collectionName === 'pacs') {
+        const sorted = [...pacs, newItem].sort((a, b) => a.name.localeCompare(b.name));
+        setPacs(sorted);
+        localStorage.setItem('lotes_pacs', JSON.stringify(sorted));
+      } else if (collectionName === 'collaborators') {
+        const sorted = [...collaborators, newItem].sort((a, b) => a.name.localeCompare(b.name));
+        setCollaborators(sorted);
+        localStorage.setItem('lotes_collaborators', JSON.stringify(sorted));
+      } else {
+        const sorted = [...statuses, newItem].sort((a, b) => a.name.localeCompare(b.name));
+        setStatuses(sorted);
+        localStorage.setItem('lotes_statuses', JSON.stringify(sorted));
+      }
+      setNewItemName('');
+      return;
+    }
     try {
       await addDoc(collection(db, collectionName), { name: newItemName });
       setNewItemName('');
