@@ -1,0 +1,42 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isValidBatch(data) {
+      return data.pac is string && data.pac.size() > 0 &&
+             data.status is string && data.status.size() > 0 &&
+             data.recebidoPor is string && data.recebidoPor.size() > 0 &&
+             data.numEnsaios is int;
+    }
+
+    function isValidConfig(data) {
+      return data.name is string && data.name.size() > 0;
+    }
+
+    match /batches/{batchId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidBatch(request.resource.data);
+      allow update: if isAuthenticated() && isValidBatch(request.resource.data);
+      allow delete: if isAuthenticated();
+    }
+
+    match /pacs/{pacId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && isValidConfig(request.resource.data);
+    }
+
+    match /collaborators/{collaboratorId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && isValidConfig(request.resource.data);
+    }
+
+    match /statuses/{statusId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && isValidConfig(request.resource.data);
+    }
+  }
+}

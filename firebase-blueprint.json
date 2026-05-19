@@ -1,0 +1,71 @@
+{
+  "entities": {
+    "Batch": {
+      "title": "Batch",
+      "description": "A test batch received for processing.",
+      "type": "object",
+      "properties": {
+        "pac": { "type": "string", "description": "PAC identifier" },
+        "periodoInicial": { "type": "string", "format": "date-time" },
+        "periodoFinal": { "type": "string", "format": "date-time" },
+        "numEnsaios": { "type": "integer" },
+        "status": { "type": "string" },
+        "recebidoPor": { "type": "string" },
+        "recebidoEm": { "type": "string", "format": "date-time" },
+        "lidoPor": { "type": "string" },
+        "lidoEm": { "type": "string", "format": "date-time" },
+        "conferidoPor": { "type": "string" },
+        "conferidoEm": { "type": "string", "format": "date-time" },
+        "lancadoPor": { "type": "string" },
+        "lancadoEm": { "type": "string", "format": "date-time" }
+      },
+      "required": ["pac", "periodoInicial", "periodoFinal", "numEnsaios", "status", "recebidoPor", "recebidoEm"]
+    },
+    "PAC": {
+      "title": "PAC",
+      "description": "PAC configuration.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" }
+      },
+      "required": ["name"]
+    },
+    "Collaborator": {
+      "title": "Collaborator",
+      "description": "System user/collaborator.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" }
+      },
+      "required": ["name"]
+    },
+    "Status": {
+      "title": "Status",
+      "description": "Batch status option.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "color": { "type": "string" }
+      },
+      "required": ["name"]
+    }
+  },
+  "firestore": {
+    "/batches/{batchId}": {
+      "schema": "Batch",
+      "description": "Collection of test batches."
+    },
+    "/pacs/{pacId}": {
+      "schema": "PAC",
+      "description": "Collection of PACs."
+    },
+    "/collaborators/{collaboratorId}": {
+      "schema": "Collaborator",
+      "description": "Collection of collaborators."
+    },
+    "/statuses/{statusId}": {
+      "schema": "Status",
+      "description": "Collection of status options."
+    }
+  }
+}

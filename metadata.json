@@ -1,0 +1,5 @@
+{
+  "name": "Gestão de Lotes de Ensaio",
+  "description": "Sistema para controle de recebimento e gestão de status de lotes de ensaio.",
+  "requestFramePermissions": []
+}
