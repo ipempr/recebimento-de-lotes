@@ -62,6 +62,17 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+// Helper to parse "yyyy-MM-dd" date strings into local Date objects at noon to avoid timezone timezone-shifting bugs.
+function parseLocalDate(dateStr: string): Date {
+  if (!dateStr) return new Date();
+  const parts = dateStr.split('-');
+  if (parts.length !== 3) return new Date(dateStr);
+  const year = parseInt(parts[0], 10);
+  const month = parseInt(parts[1], 10);
+  const day = parseInt(parts[2], 10);
+  return new Date(year, month - 1, day, 12, 0, 0);
+}
+
 // Types
 enum OperationType {
   CREATE = 'create',
@@ -525,11 +536,11 @@ export default function App() {
 
       // Dashboard Period Filter
       if (dashStartDate) {
-        const start = startOfDay(new Date(dashStartDate));
+        const start = startOfDay(parseLocalDate(dashStartDate));
         if (b.periodoInicial.toDate() < start) return false;
       }
       if (dashEndDate) {
-        const end = startOfDay(new Date(dashEndDate));
+        const end = startOfDay(parseLocalDate(dashEndDate));
         if (startOfDay(b.periodoInicial.toDate()) > end) return false;
       }
 
@@ -548,11 +559,11 @@ export default function App() {
       // Check if batch is within dashboard period filter
       let match = true;
       if (dashStartDate) {
-        const start = startOfDay(new Date(dashStartDate));
+        const start = startOfDay(parseLocalDate(dashStartDate));
         if (b.periodoInicial.toDate() < start) match = false;
       }
       if (dashEndDate) {
-        const end = startOfDay(new Date(dashEndDate));
+        const end = startOfDay(parseLocalDate(dashEndDate));
         if (startOfDay(b.periodoInicial.toDate()) > end) match = false;
       }
 
@@ -1249,15 +1260,23 @@ function BatchModal({ isOpen, onClose, batch, pacs, collaborators, statuses, han
     }
 
     try {
+      const getTimestampFromDate = (date: Date) => {
+        return isLocalMode ? LocalTimestamp.fromDate(date) : Timestamp.fromDate(date);
+      };
+      
+      const getTimestampNow = () => {
+        return isLocalMode ? LocalTimestamp.now() : Timestamp.now();
+      };
+
       const data = {
         ...formData,
         status: finalStatus,
         numEnsaios: Number(formData.numEnsaios),
-        periodoInicial: Timestamp.fromDate(new Date(formData.periodoInicial)),
-        periodoFinal: Timestamp.fromDate(new Date(formData.periodoFinal)),
-        recebidoEm: batch?.recebidoEm || Timestamp.now(),
-        lidoEm: formData.lidoPor.trim() ? (batch?.lidoPor ? batch.lidoEm : Timestamp.now()) : null,
-        conferidoEm: formData.conferidoPor.trim() ? (batch?.conferidoPor ? batch.conferidoEm : Timestamp.now()) : null,
+        periodoInicial: getTimestampFromDate(parseLocalDate(formData.periodoInicial)),
+        periodoFinal: getTimestampFromDate(parseLocalDate(formData.periodoFinal)),
+        recebidoEm: batch?.recebidoEm || getTimestampNow(),
+        lidoEm: formData.lidoPor.trim() ? (batch?.lidoPor ? batch.lidoEm : getTimestampNow()) : null,
+        conferidoEm: formData.conferidoPor.trim() ? (batch?.conferidoPor ? batch.conferidoEm : getTimestampNow()) : null,
       };
 
       if (isLocalMode) {
@@ -2519,11 +2538,11 @@ function StatsPanel({ batches, collaborators }: { batches: any[]; collaborators:
 
       // Period filters based on periodoInicial
       if (statsStartDate) {
-        const start = startOfDay(new Date(statsStartDate));
+        const start = startOfDay(parseLocalDate(statsStartDate));
         if (b.periodoInicial.toDate() < start) return false;
       }
       if (statsEndDate) {
-        const end = startOfDay(new Date(statsEndDate));
+        const end = startOfDay(parseLocalDate(statsEndDate));
         if (startOfDay(b.periodoInicial.toDate()) > end) return false;
       }
 
