@@ -272,6 +272,13 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [googleLoginError, setGoogleLoginError] = useState<any | null>(null);
 
+  // Dashboard Period States
+  const defaultDashStart = useMemo(() => format(new Date(new Date().getFullYear(), new Date().getMonth(), 1), 'yyyy-MM-dd'), []);
+  const defaultDashEnd = useMemo(() => format(new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0), 'yyyy-MM-dd'), []);
+
+  const [dashStartDate, setDashStartDate] = useState<string>(defaultDashStart);
+  const [dashEndDate, setDashEndDate] = useState<string>(defaultDashEnd);
+
   // Error Handler
   const handleFirestoreError = (error: unknown, operationType: OperationType, path: string | null) => {
     const errInfo: FirestoreErrorInfo = {
@@ -516,63 +523,66 @@ export default function App() {
       if (statusFilter === 'ALERTA' && !isWarning) return false;
       if (statusFilter === 'EM DIA' && (isOverdue || isWarning || isFinished)) return false;
 
+      // Dashboard Period Filter
+      if (dashStartDate) {
+        const start = startOfDay(new Date(dashStartDate));
+        if (b.periodoInicial.toDate() < start) return false;
+      }
+      if (dashEndDate) {
+        const end = startOfDay(new Date(dashEndDate));
+        if (startOfDay(b.periodoInicial.toDate()) > end) return false;
+      }
+
       return matchesSearch;
     });
-  }, [batches, searchTerm, statusFilter]);
+  }, [batches, searchTerm, statusFilter, dashStartDate, dashEndDate]);
 
-  // Statistics
+  // Statistics for Dashboard overview cards (respects the selected Dashboard period filter)
   const stats = useMemo(() => {
-    const openBatches = batches.filter(b => !b.conferidoPor);
-    const totalOpen = openBatches.length;
-    
-    // Productivity: collaborator -> { lido: N, informado: N }
-    const productivity: Record<string, { lido: number, informado: number }> = {};
-    
     let onTimeCount = 0;
     let lateCount = 0;
     let totalEnsaiosFinished = 0;
     let totalEnsaiosOpen = 0;
 
     batches.forEach(b => {
-      if (!b.conferidoPor) {
-        totalEnsaiosOpen += b.numEnsaios;
+      // Check if batch is within dashboard period filter
+      let match = true;
+      if (dashStartDate) {
+        const start = startOfDay(new Date(dashStartDate));
+        if (b.periodoInicial.toDate() < start) match = false;
+      }
+      if (dashEndDate) {
+        const end = startOfDay(new Date(dashEndDate));
+        if (startOfDay(b.periodoInicial.toDate()) > end) match = false;
       }
 
-      // Track Reading
-      if (b.lidoPor) {
-        if (!productivity[b.lidoPor]) productivity[b.lidoPor] = { lido: 0, informado: 0 };
-        productivity[b.lidoPor].lido += b.numEnsaios;
-      }
-      // Track Informing
-      if (b.conferidoPor) {
-        if (!productivity[b.conferidoPor]) productivity[b.conferidoPor] = { lido: 0, informado: 0 };
-        productivity[b.conferidoPor].informado += b.numEnsaios;
-        totalEnsaiosFinished += b.numEnsaios;
-        
-        // On time vs Late
-        const deadline = addDays(b.periodoInicial.toDate(), 30);
-        if (isAfter(b.conferidoEm!.toDate(), deadline)) {
-          lateCount++;
+      if (match) {
+        if (!b.conferidoPor) {
+          totalEnsaiosOpen += b.numEnsaios;
         } else {
-          onTimeCount++;
+          totalEnsaiosFinished += b.numEnsaios;
+          
+          // On time vs Late
+          const deadline = addDays(b.periodoInicial.toDate(), 30);
+          if (isAfter(b.conferidoEm!.toDate(), deadline)) {
+            lateCount++;
+          } else {
+            onTimeCount++;
+          }
         }
       }
     });
 
+    const totalFinished = onTimeCount + lateCount;
+
     return {
-      totalOpen,
-      productivity: Object.entries(productivity).sort((a, b) => {
-        const totalA = a[1].lido + a[1].informado;
-        const totalB = b[1].lido + b[1].informado;
-        return totalB - totalA;
-      }),
       onTimeCount,
       lateCount,
-      totalFinished: onTimeCount + lateCount,
+      totalFinished,
       totalEnsaiosFinished,
       totalEnsaiosOpen
     };
-  }, [batches]);
+  }, [batches, dashStartDate, dashEndDate]);
 
   const handleDeleteBatch = async (id: string) => {
     if (isLocalMode) {
@@ -752,6 +762,58 @@ export default function App() {
 
         {activeTab === 'dashboard' ? (
           <>
+            {/* Filtro de Período do Dashboard */}
+            <div className="bg-white p-6 rounded-[24px] border border-[#e5e5e0] mb-8">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <h3 className="text-sm font-bold uppercase tracking-wider text-[#5A5A40]">Filtro de Período de Produção</h3>
+                  <p className="text-xs text-[#5A5A40]/60">Mostrando dados correspondentes aos lotes cujo período inicial está no intervalo selecionado.</p>
+                </div>
+                <div className="flex flex-wrap items-center gap-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-[#5A5A40]/70">De:</span>
+                    <input
+                      type="date"
+                      className="px-3 py-2 bg-[#f5f5f0] border border-[#e5e5e0] rounded-xl text-xs focus:ring-2 focus:ring-[#5A5A40]/20 focus:outline-none font-medium text-gray-700"
+                      value={dashStartDate}
+                      onChange={(e) => setDashStartDate(e.target.value)}
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-[#5A5A40]/70">Até:</span>
+                    <input
+                      type="date"
+                      className="px-3 py-2 bg-[#f5f5f0] border border-[#e5e5e0] rounded-xl text-xs focus:ring-2 focus:ring-[#5A5A40]/20 focus:outline-none font-medium text-gray-700"
+                      value={dashEndDate}
+                      onChange={(e) => setDashEndDate(e.target.value)}
+                    />
+                  </div>
+                  <div className="flex gap-2 shrink-0">
+                    <button
+                      onClick={() => {
+                        setDashStartDate(defaultDashStart);
+                        setDashEndDate(defaultDashEnd);
+                      }}
+                      className="px-3 py-2 bg-[#f0f0e5] font-bold text-[#5A5A40] text-xs rounded-xl hover:bg-[#e0e0d5] transition-all"
+                      title="Reiniciar para o mês atual"
+                    >
+                      Este Mês
+                    </button>
+                    <button
+                      onClick={() => {
+                        setDashStartDate('');
+                        setDashEndDate('');
+                      }}
+                      className="px-3 py-2 bg-gray-100 font-bold text-gray-600 text-xs rounded-xl hover:bg-gray-200 transition-all"
+                      title="Mostrar todos os registros"
+                    >
+                      Limpar
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             {/* Stats Overview */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
               <div className="bg-white p-6 rounded-[24px] border border-[#e5e5e0] flex items-center gap-4">
@@ -848,7 +910,7 @@ export default function App() {
             </div>
           </>
         ) : activeTab === 'stats' ? (
-          <StatsPanel stats={stats} />
+          <StatsPanel batches={batches} collaborators={collaborators} />
         ) : (
           <ConfigPanel 
             pacs={pacs} 
@@ -2431,9 +2493,160 @@ function ConfigPanel({
 );
 }
 
-function StatsPanel({ stats }: { stats: any }) {
+function StatsPanel({ batches, collaborators }: { batches: any[]; collaborators: any[] }) {
+  const [selectedCollab, setSelectedCollab] = useState<string>('');
+  const [statsStartDate, setStatsStartDate] = useState<string>('');
+  const [statsEndDate, setStatsEndDate] = useState<string>('');
+
+  // Get unique list of collaborators alphabetically
+  const uniqueCollabsAlphabetical = useMemo(() => {
+    const list = collaborators.map((c: any) => c.name);
+    batches.forEach(b => {
+      if (b.lidoPor && !list.includes(b.lidoPor)) list.push(b.lidoPor);
+      if (b.conferidoPor && !list.includes(b.conferidoPor)) list.push(b.conferidoPor);
+    });
+    return Array.from(new Set(list)).sort((a, b) => a.localeCompare(b));
+  }, [collaborators, batches]);
+
+  // Filter batches based on inputs
+  const filtered = useMemo(() => {
+    return batches.filter(b => {
+      // Name filter: either lidoPor or conferidoPor contains the selectedCollab
+      if (selectedCollab) {
+        const matchesCollab = (b.lidoPor === selectedCollab) || (b.conferidoPor === selectedCollab);
+        if (!matchesCollab) return false;
+      }
+
+      // Period filters based on periodoInicial
+      if (statsStartDate) {
+        const start = startOfDay(new Date(statsStartDate));
+        if (b.periodoInicial.toDate() < start) return false;
+      }
+      if (statsEndDate) {
+        const end = startOfDay(new Date(statsEndDate));
+        if (startOfDay(b.periodoInicial.toDate()) > end) return false;
+      }
+
+      return true;
+    });
+  }, [batches, selectedCollab, statsStartDate, statsEndDate]);
+
+  // Compute stats on the filtered batches
+  const computedStats = useMemo(() => {
+    const productivity: Record<string, { lido: number, informado: number }> = {};
+    
+    let onTimeCount = 0;
+    let lateCount = 0;
+    let totalEnsaiosFinished = 0;
+    let totalEnsaiosOpen = 0;
+
+    filtered.forEach(b => {
+      if (!b.conferidoPor) {
+        totalEnsaiosOpen += b.numEnsaios;
+      }
+
+      // Track reading productivity
+      if (b.lidoPor) {
+        if (!selectedCollab || b.lidoPor === selectedCollab) {
+          if (!productivity[b.lidoPor]) productivity[b.lidoPor] = { lido: 0, informado: 0 };
+          productivity[b.lidoPor].lido += b.numEnsaios;
+        }
+      }
+
+      // Track informing productivity
+      if (b.conferidoPor) {
+        if (!selectedCollab || b.conferidoPor === selectedCollab) {
+          if (!productivity[b.conferidoPor]) productivity[b.conferidoPor] = { lido: 0, informado: 0 };
+          productivity[b.conferidoPor].informado += b.numEnsaios;
+        }
+        
+        // Quality stats counts (onTime vs late)
+        if (!selectedCollab || b.conferidoPor === selectedCollab) {
+          totalEnsaiosFinished += b.numEnsaios;
+          const deadline = addDays(b.periodoInicial.toDate(), 30);
+          if (isAfter(b.conferidoEm!.toDate(), deadline)) {
+            lateCount++;
+          } else {
+            onTimeCount++;
+          }
+        }
+      }
+    });
+
+    // List the collaborators sorted alphabetically! "Listar os colaboradores por ordem alfabética."
+    const productivityList = Object.entries(productivity).sort((a, b) => {
+      return a[0].localeCompare(b[0]);
+    });
+
+    const totalFinished = onTimeCount + lateCount;
+
+    return {
+      productivity: productivityList,
+      onTimeCount,
+      lateCount,
+      totalFinished,
+      totalEnsaiosFinished,
+      totalEnsaiosOpen
+    };
+  }, [filtered, selectedCollab]);
+
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 animate-in fade-in duration-200">
+      {/* Filtros da Tela Estatísticas */}
+      <div className="bg-white p-6 rounded-[32px] border border-[#e5e5e0]">
+        <div className="flex flex-col lg:flex-row gap-6 items-end justify-between">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 flex-1 w-full">
+            {/* Filtro por Colaborador */}
+            <div className="space-y-2">
+              <label className="text-xs font-bold uppercase text-[#5A5A40]">Filtar por Colaborador</label>
+              <select
+                className="w-full p-3 bg-[#f5f5f0] border-none rounded-xl text-sm focus:ring-2 focus:ring-[#5A5A40]/20 focus:outline-none font-medium text-gray-700"
+                value={selectedCollab}
+                onChange={(e) => setSelectedCollab(e.target.value)}
+              >
+                <option value="">Todos os Colaboradores</option>
+                {uniqueCollabsAlphabetical.map(name => (
+                  <option key={name} value={name}>{name}</option>
+                ))}
+              </select>
+            </div>
+            {/* Período Inicial */}
+            <div className="space-y-2">
+              <label className="text-xs font-bold uppercase text-[#5A5A40]">Período Inicial (Filtro)</label>
+              <input
+                type="date"
+                className="w-full p-3 bg-[#f5f5f0] border-none rounded-xl text-sm focus:ring-2 focus:ring-[#5A5A40]/20 focus:outline-none font-medium text-gray-700"
+                value={statsStartDate}
+                onChange={(e) => setStatsStartDate(e.target.value)}
+              />
+            </div>
+            {/* Período Final */}
+            <div className="space-y-2">
+              <label className="text-xs font-bold uppercase text-[#5A5A40]">Período Final (Filtro)</label>
+              <input
+                type="date"
+                className="w-full p-3 bg-[#f5f5f0] border-none rounded-xl text-sm focus:ring-2 focus:ring-[#5A5A40]/20 focus:outline-none font-medium text-gray-700"
+                value={statsEndDate}
+                onChange={(e) => setStatsEndDate(e.target.value)}
+              />
+            </div>
+          </div>
+          {/* Ações de Limpeza */}
+          {(selectedCollab || statsStartDate || statsEndDate) && (
+            <button
+              onClick={() => {
+                setSelectedCollab('');
+                setStatsStartDate('');
+                setStatsEndDate('');
+              }}
+              className="w-full lg:w-auto px-6 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold text-xs rounded-xl transition-all"
+            >
+              Limpar Filtros
+            </button>
+          )}
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Productivity by Collaborator x Activity */}
         <div className="lg:col-span-2 bg-white rounded-[32px] p-8 border border-[#e5e5e0]">
@@ -2451,7 +2664,7 @@ function StatsPanel({ stats }: { stats: any }) {
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#f5f5f0]">
-                {stats.productivity.map(([name, data]: [string, any]) => (
+                {computedStats.productivity.map(([name, data]: [string, any]) => (
                   <tr key={name} className="group hover:bg-[#f5f5f0]/50 transition-colors">
                     <td className="py-4 font-medium">{name}</td>
                     <td className="py-4 text-center">
@@ -2462,10 +2675,10 @@ function StatsPanel({ stats }: { stats: any }) {
                     </td>
                   </tr>
                 ))}
-                {stats.productivity.length === 0 && (
+                {computedStats.productivity.length === 0 && (
                   <tr>
                     <td colSpan={5} className="py-8 text-center text-sm text-[#5A5A40] opacity-60 italic">
-                      Nenhuma atividade registrada ainda.
+                      Nenhuma atividade registrada ainda para este período / filtro.
                     </td>
                   </tr>
                 )}
@@ -2492,7 +2705,7 @@ function StatsPanel({ stats }: { stats: any }) {
                 <path
                   className="text-emerald-500 stroke-current"
                   strokeWidth="3"
-                  strokeDasharray={`${stats.totalFinished > 0 ? (stats.onTimeCount / stats.totalFinished) * 100 : 0}, 100`}
+                  strokeDasharray={`${computedStats.totalFinished > 0 ? (computedStats.onTimeCount / computedStats.totalFinished) * 100 : 0}, 100`}
                   strokeLinecap="round"
                   fill="none"
                   d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
@@ -2500,7 +2713,7 @@ function StatsPanel({ stats }: { stats: any }) {
               </svg>
               <div className="absolute inset-0 flex items-center justify-center flex-col">
                 <span className="text-2xl font-bold">
-                  {stats.totalFinished > 0 ? Math.round((stats.onTimeCount / stats.totalFinished) * 100) : 0}%
+                  {computedStats.totalFinished > 0 ? Math.round((computedStats.onTimeCount / computedStats.totalFinished) * 100) : 0}%
                 </span>
                 <span className="text-[10px] uppercase font-bold opacity-50">No Prazo</span>
               </div>
@@ -2508,11 +2721,11 @@ function StatsPanel({ stats }: { stats: any }) {
             <div className="mt-6 flex gap-8 text-sm font-medium">
               <div className="flex items-center gap-2">
                 <div className="w-3 h-3 bg-emerald-500 rounded-full" />
-                <span>No Prazo: {stats.onTimeCount}</span>
+                <span>No Prazo: {computedStats.onTimeCount}</span>
               </div>
               <div className="flex items-center gap-2">
                 <div className="w-3 h-3 bg-red-400 rounded-full" />
-                <span>Atrasados: {stats.lateCount}</span>
+                <span>Atrasados: {computedStats.lateCount}</span>
               </div>
             </div>
           </div>
