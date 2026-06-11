@@ -148,6 +148,109 @@ function parseLocalTimestamp(raw: any): any {
   return LocalTimestamp.now();
 }
 
+interface AuthErrorDetails {
+  code: string;
+  title: string;
+  message: string;
+  actionHtml?: string;
+}
+
+function parseAuthError(err: any): AuthErrorDetails {
+  const code = err?.code || '';
+  const message = err?.message || String(err);
+  
+  if (code === 'auth/unauthorized-domain' || message.includes('unauthorized-domain') || message.includes('domain is not authorized')) {
+    const currentDomain = window.location.hostname;
+    return {
+      code: 'auth/unauthorized-domain',
+      title: 'Domínio Não Autorizado',
+      message: `O domínio atual (${currentDomain}) não está na lista de domínios autorizados no Firebase.`,
+      actionHtml: `
+        <div class="mt-3 text-sm space-y-2 text-[#5a5a40]">
+          <p>Para corrigir, siga os passos abaixo no seu painel do Firebase (ID do Projeto: <strong class="select-all bg-[#f5f5f0] px-1 rounded">ai-studio-applet-webapp-71b30</strong>):</p>
+          <ol class="list-decimal list-inside space-y-2 pl-1 bg-[#f5f5f0] p-4 rounded-xl border border-[#e5e5e0] text-xs text-left">
+            <li>Acesse o link direto do console Firebase: <br/>
+              <a href="https://console.firebase.google.com/project/ai-studio-applet-webapp-71b30/authentication/settings" target="_blank" rel="noopener noreferrer" class="underline font-bold text-blue-600 hover:text-blue-800 break-all">
+                Abrir Painel de Configurações
+              </a>
+            </li>
+            <li>Encontre a seção de <strong>"Domínios autorizados"</strong> (Authorized domains).</li>
+            <li>Clique em <strong>"Adicionar domínio"</strong>.</li>
+            <li>Insira este domínio exatamente: <code class="bg-white border border-[#e5e5e0] px-1.5 py-0.5 rounded text-red-600 font-mono text-xs select-all font-bold">${currentDomain}</code> e clique em <strong>Adicionar</strong>.</li>
+            <li>Caso precise carregar no editor ou painel de desenvolvimento, verifique se também adicionou: <br/><code class="bg-white border border-[#e5e5e0] px-1.5 py-0.5 rounded font-mono text-xs select-all font-bold">ais-dev-2wvwziemydj4o6k52si3ec-323441203869.us-east1.run.app</code>.</li>
+          </ol>
+          <p class="text-xs text-[#5a5a40]/80">Após realizar este passo no console do Firebase, basta atualizar esta página e tentar o login novamente!</p>
+        </div>
+      `
+    };
+  }
+  
+  if (code === 'auth/operation-not-allowed' || message.includes('operation-not-allowed')) {
+    return {
+      code: 'auth/operation-not-allowed',
+      title: 'Login Google Desabilitado',
+      message: 'O provedor de login com Google não foi ativado no painel de controle do Firebase.',
+      actionHtml: `
+        <div class="mt-3 text-sm space-y-2 text-[#5a5a40]">
+          <p>Para ativar o login social:</p>
+          <ol class="list-decimal list-inside space-y-2 pl-1 bg-[#f5f5f0] p-4 rounded-xl border border-[#e5e5e0] text-xs text-left">
+            <li>Acesse o link: <br/>
+              <a href="https://console.firebase.google.com/project/ai-studio-applet-webapp-71b30/authentication/providers" target="_blank" rel="noopener noreferrer" class="underline font-bold text-blue-600 hover:text-blue-800 break-all">
+                Abrir Métodos de Login no Firebase
+              </a>
+            </li>
+            <li>Clique em <strong>"Adicionar novo provedor"</strong> e selecione <strong>Google</strong>.</li>
+            <li>Ative o provedor, selecione um <strong>e-mail de suporte</strong> do projeto e clique em <strong>Salvar</strong>.</li>
+          </ol>
+        </div>
+      `
+    };
+  }
+
+  if (code === 'auth/popup-blocked') {
+    return {
+      code,
+      title: 'Popup Bloqueado pelo Navegador',
+      message: 'A janela pop-up de login do Google foi bloqueada pelo seu navegador.',
+      actionHtml: `
+        <div class="mt-3 text-sm space-y-1 text-[#5a5a40] text-left">
+          <p>Como resolver:</p>
+          <ul class="list-disc list-inside space-y-1 pl-1 text-xs">
+            <li>Procure pelo ícone de popup bloqueado na barra de endereços (geralmente no canto superior direito) e selecione <strong>Sempre permitir popups deste site</strong>.</li>
+            <li>Após habilitar, tente clicar em <strong>"Entrar com Google"</strong> novamente.</li>
+            <li>Ou utilize o <strong>Acesso Demonstrativo Local</strong> abaixo para usar offline!</li>
+          </ul>
+        </div>
+      `
+    };
+  }
+
+  if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+    return {
+      code,
+      title: 'Login Cancelado',
+      message: 'A janela de login com o Google foi fechada antes de o login ser concluído.',
+      actionHtml: `
+        <div class="mt-3 text-sm text-[#5a5a40] text-xs text-left">
+          <p>Por favor, clique em <strong>"Entrar com Google"</strong> novamente para tentar outra vez.</p>
+        </div>
+      `
+    };
+  }
+
+  return {
+    code,
+    title: 'Erro de Autenticação',
+    message: message || 'Não foi possível efetuar o login usando a Conta Google.',
+    actionHtml: `
+      <div class="mt-3 text-xs text-[#5a5a40]/90 text-left">
+        <p class="font-mono text-[11px] bg-[#f5f5f0] p-2 rounded border border-[#e5e5e0] text-red-600 break-all">Código: ${code || 'Desconhecido'}<br/>Mensagem: ${message}</p>
+        <p class="mt-2 text-xs">Tente novamente ou use o <strong>Acesso Demonstrativo Local</strong> para testar as funcionalidades do aplicativo imediatamente.</p>
+      </div>
+    `
+  };
+}
+
 export default function App() {
   const [isLocalMode, setIsLocalMode] = useState(() => {
     return localStorage.getItem('lotes_isLocalMode') === 'true';
@@ -167,6 +270,7 @@ export default function App() {
   const [batchToDelete, setBatchToDelete] = useState<string | null>(null);
   const [configToDelete, setConfigToDelete] = useState<{type: string, id: string} | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [googleLoginError, setGoogleLoginError] = useState<any | null>(null);
 
   // Error Handler
   const handleFirestoreError = (error: unknown, operationType: OperationType, path: string | null) => {
@@ -206,12 +310,13 @@ export default function App() {
   }, []);
 
   const handleLogin = async () => {
+    setGoogleLoginError(null);
     try {
       const provider = new GoogleAuthProvider();
       await signInWithPopup(auth, provider);
     } catch (err: any) {
       console.error(err);
-      setError(`Falha no login com Google: ${err.message || err}. Você também pode utilizar o Acesso Demonstrativo Local.`);
+      setGoogleLoginError(err);
     }
   };
 
@@ -520,11 +625,36 @@ export default function App() {
   if (!user) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#f5f5f0] p-4">
-        <div className="max-w-md w-full bg-white rounded-[32px] p-12 shadow-xl text-center">
+        <div className="max-w-md w-full bg-white rounded-[32px] p-8 sm:p-12 shadow-xl text-center">
           <h1 className="text-4xl font-display font-bold tracking-tight mb-4 text-[#1a1a1a]">Gestão de Lotes</h1>
           <p className="text-[#5A5A40] mb-8 leading-relaxed">
             Gerencie e acompanhe lotes de ensaios de modo rápido, prático e persistente.
           </p>
+
+          {googleLoginError && (() => {
+            const parsed = parseAuthError(googleLoginError);
+            return (
+              <div className="mb-6 bg-red-50 border border-red-200 text-left p-5 rounded-2.5xl relative">
+                <button 
+                  onClick={() => setGoogleLoginError(null)} 
+                  className="absolute top-4 right-4 text-[#5a5a40] hover:text-red-700 transition cursor-pointer"
+                  title="Fechar"
+                >
+                  <X size={16} />
+                </button>
+                <div className="flex gap-2.5 items-start text-red-800">
+                  <AlertCircle size={18} className="flex-shrink-0 mt-0.5" />
+                  <div>
+                    <h3 className="font-semibold text-sm leading-snug">{parsed.title}</h3>
+                    <p className="text-xs mt-1 text-red-700/90 leading-normal">{parsed.message}</p>
+                  </div>
+                </div>
+                {parsed.actionHtml && (
+                  <div dangerouslySetInnerHTML={{ __html: parsed.actionHtml }} />
+                )}
+              </div>
+            );
+          })()}
 
           <button 
             onClick={handleLogin}
