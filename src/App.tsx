@@ -1163,7 +1163,7 @@ function BatchModal({ isOpen, onClose, batch, pacs, collaborators, statuses, han
     periodoInicial: batch?.periodoInicial ? format(batch.periodoInicial.toDate(), "yyyy-MM-dd") : '',
     periodoFinal: batch?.periodoFinal ? format(batch.periodoFinal.toDate(), "yyyy-MM-dd") : '',
     numEnsaios: batch?.numEnsaios || 0,
-    status: batch?.status || 'EM ABERTO', // Default to EM ABERTO
+    status: batch?.status || 'ABERTO', // Default to ABERTO
     recebidoPor: batch?.recebidoPor || '',
     lidoPor: batch?.lidoPor || '',
     conferidoPor: batch?.conferidoPor || '',
@@ -1172,9 +1172,15 @@ function BatchModal({ isOpen, onClose, batch, pacs, collaborators, statuses, han
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    // Auto-status logic: if "Lido" and "Informado" fields are filled, status becomes FINALIZADO automatically
+    let finalStatus = formData.status;
+    if (formData.lidoPor.trim() && formData.conferidoPor.trim()) {
+      finalStatus = 'FINALIZADO';
+    }
+
     // Validation for FINALIZADO status
-    if (formData.status === 'FINALIZADO') {
-      if (!formData.lidoPor || !formData.conferidoPor) {
+    if (finalStatus === 'FINALIZADO') {
+      if (!formData.lidoPor.trim() || !formData.conferidoPor.trim()) {
         setLocalError('Para definir como FINALIZADO, é necessário informar quem Leu e Informou.');
         return;
       }
@@ -1183,12 +1189,13 @@ function BatchModal({ isOpen, onClose, batch, pacs, collaborators, statuses, han
     try {
       const data = {
         ...formData,
+        status: finalStatus,
         numEnsaios: Number(formData.numEnsaios),
         periodoInicial: Timestamp.fromDate(new Date(formData.periodoInicial)),
         periodoFinal: Timestamp.fromDate(new Date(formData.periodoFinal)),
         recebidoEm: batch?.recebidoEm || Timestamp.now(),
-        lidoEm: formData.lidoPor && !batch?.lidoPor ? Timestamp.now() : (batch?.lidoEm || null),
-        conferidoEm: formData.conferidoPor && !batch?.conferidoPor ? Timestamp.now() : (batch?.conferidoEm || null),
+        lidoEm: formData.lidoPor.trim() ? (batch?.lidoPor ? batch.lidoEm : Timestamp.now()) : null,
+        conferidoEm: formData.conferidoPor.trim() ? (batch?.conferidoPor ? batch.conferidoEm : Timestamp.now()) : null,
       };
 
       if (isLocalMode) {
@@ -1366,6 +1373,121 @@ function ConfigPanel({
   const [showDeleteAllConfirm, setShowDeleteAllConfirm] = useState(false);
   const [isDeletingAll, setIsDeletingAll] = useState(false);
 
+  // Raw / Paste and review states
+  const [pastedInput, setPastedInput] = useState('');
+  const [previewItems, setPreviewItems] = useState<any[] | null>(null);
+  const [isSavingPreview, setIsSavingPreview] = useState(false);
+
+  const checkDuplicates = (itemsToImport: any[], existingBatches: any[]) => {
+    const getBatchKeyString = (b: any) => {
+      const pacPart = String(b.pac || '').trim().toUpperCase();
+      const getTimestampDateStr = (ts: any) => {
+        if (!ts) return '';
+        let d: Date;
+        if (ts.toDate && typeof ts.toDate === 'function') {
+          d = ts.toDate();
+        } else if (ts instanceof Date) {
+          d = ts;
+        } else if (typeof ts === 'string') {
+          d = new Date(ts);
+        } else if (ts.seconds) {
+          d = new Date(ts.seconds * 1000);
+        } else {
+          d = new Date(ts);
+        }
+        return isNaN(d.getTime()) ? '' : d.toISOString().split('T')[0];
+      };
+      const pi = getTimestampDateStr(b.periodoInicial);
+      const pf = getTimestampDateStr(b.periodoFinal);
+      return `${pacPart}__${pi}__${pf}`;
+    };
+
+    const existingKeys = new Set(existingBatches.map(b => getBatchKeyString(b)));
+    const seenInternalKeys = new Map<string, string[]>();
+
+    const itemsWithDuplicates = itemsToImport.map(item => {
+      const itemId = item.id || 'preview-' + Math.random().toString(36).substring(2, 9);
+      const key = getBatchKeyString(item);
+      
+      let isDuplicate = false;
+      let duplicateType: 'database' | 'internal' | undefined = undefined;
+
+      if (existingKeys.has(key)) {
+        isDuplicate = true;
+        duplicateType = 'database';
+      }
+
+      if (!seenInternalKeys.has(key)) {
+        seenInternalKeys.set(key, [itemId]);
+      } else {
+        seenInternalKeys.get(key)!.push(itemId);
+      }
+
+      return {
+        ...item,
+        id: itemId,
+        isDuplicate,
+        duplicateType,
+        key
+      };
+    });
+
+    return itemsWithDuplicates.map(item => {
+      const ids = seenInternalKeys.get(item.key) || [];
+      if (ids.length > 1) {
+        return {
+          ...item,
+          isDuplicate: true,
+          duplicateType: item.duplicateType || 'internal'
+        };
+      }
+      return item;
+    });
+  };
+
+  const handleAutoRemoveDuplicates = () => {
+    if (!previewItems) return;
+    const uniqueKeys = new Set<string>();
+    const cleaned: any[] = [];
+    
+    previewItems.forEach(item => {
+      if (item.duplicateType === 'database') {
+        return;
+      }
+      if (!uniqueKeys.has(item.key)) {
+        uniqueKeys.add(item.key);
+        cleaned.push({
+          ...item,
+          isDuplicate: false,
+          duplicateType: undefined
+        });
+      }
+    });
+
+    setPreviewItems(cleaned);
+    setImportStatus({
+      type: 'success',
+      message: `Duplicados removidos. ${cleaned.length} itens prontos para importação.`
+    });
+  };
+
+  const formatTimestamp = (ts: any) => {
+    if (!ts) return '-';
+    let d: Date;
+    if (ts.toDate && typeof ts.toDate === 'function') {
+      d = ts.toDate();
+    } else if (ts instanceof Date) {
+      d = ts;
+    } else if (typeof ts === 'string') {
+      d = new Date(ts);
+    } else if (ts.seconds) {
+      d = new Date(ts.seconds * 1000);
+    } else {
+      d = new Date(ts);
+    }
+    return isNaN(d.getTime()) ? '-' : format(d, 'dd/MM/yyyy');
+  };
+
   const handleOneDriveLink = (url: string) => {
     // Basic conversion for OneDrive links
     if (url.includes('onedrive.live.com/view.aspx')) {
@@ -1378,31 +1500,77 @@ function ConfigPanel({
     return url;
   };
 
-  const processExcelData = async (buffer: ArrayBuffer) => {
+  const cleanString = (val: any): string => {
+    if (val === null || val === undefined) return '';
+    const s = String(val).trim();
+    const lower = s.toLowerCase();
+    if (lower === 'null' || lower === 'undefined' || lower === '-' || lower === 'n/a' || lower === 'na') {
+      return '';
+    }
+    return s;
+  };
+
+  const parseCSV = (buffer: ArrayBuffer): any[] => {
+    let text = '';
     try {
-      const workbook = read(buffer, { cellDates: true });
-      
-      // Look for the "PRODUÇÃO" sheet specifically
-      let targetSheetName = workbook.SheetNames.find(name => 
-        name.trim().toUpperCase() === 'PRODUÇÃO' || 
-        name.trim().toUpperCase() === 'PRODUCAO'
-      );
-
-      if (!targetSheetName) {
-        // Fallback to first sheet if PRODUÇÃO is not found, or throw error?
-        // User said "somente a aba PRODUÇÃO deve ser considerada", so let's be strict.
-        throw new Error('A aba "PRODUÇÃO" não foi encontrada na planilha.');
+      text = new TextDecoder('utf-8').decode(buffer);
+      if (text.includes('') || text.includes('')) {
+        text = new TextDecoder('windows-1252').decode(buffer);
       }
+    } catch (e) {
+      text = new TextDecoder('windows-1252').decode(buffer);
+    }
 
-      const worksheet = workbook.Sheets[targetSheetName];
-      const data = utils.sheet_to_json(worksheet) as any[];
+    const lines = text.split(/\r?\n/).filter(line => line.trim() !== '');
+    if (lines.length === 0) {
+      throw new Error('O arquivo CSV está vazio.');
+    }
 
+    // Sniff delimiter
+    const firstLine = lines[0];
+    const semicolonCount = (firstLine.match(/;/g) || []).length;
+    const commaCount = (firstLine.match(/,/g) || []).length;
+    const delimiter = semicolonCount > commaCount ? ';' : ',';
+
+    const parseCSVLine = (line: string, delim: string) => {
+      const result: string[] = [];
+      let current = '';
+      let inQuotes = false;
+      for (let i = 0; i < line.length; i++) {
+        const char = line[i];
+        if (char === '"') {
+          inQuotes = !inQuotes;
+        } else if (char === delim && !inQuotes) {
+          result.push(current.trim());
+          current = '';
+        } else {
+          current += char;
+        }
+      }
+      result.push(current.trim());
+      return result;
+    };
+
+    const headers = parseCSVLine(lines[0], delimiter);
+    const data = lines.slice(1).map(line => {
+      const values = parseCSVLine(line, delimiter);
+      const row: any = {};
+      headers.forEach((header, index) => {
+        row[header] = values[index] !== undefined ? values[index] : '';
+      });
+      return row;
+    });
+
+    return data;
+  };
+
+  const processParsedDataObjects = async (data: any[]) => {
+    try {
       if (data.length === 0) {
-        throw new Error('A planilha está vazia.');
+        throw new Error('Nenhum dado legível foi encontrado.');
       }
 
-      let importedCount = 0;
-      const importedLocalBatches: Batch[] = [];
+      const parsedItems: any[] = [];
 
       for (const row of data) {
         // Mapping columns based on user's specific headers (case-insensitive support)
@@ -1419,54 +1587,73 @@ function ConfigPanel({
         const parseExcelDate = (val: any) => {
           if (!val) return null;
           
-          // If already a Date object (from cellDates: true)
           if (val instanceof Date) {
             return isNaN(val.getTime()) ? null : Timestamp.fromDate(val);
           }
 
-          // Handle DD/MM/AA or DD/MM/YYYY strings
-          if (typeof val === 'string' && val.includes('/')) {
-            const parts = val.split('/');
-            if (parts.length === 3) {
-              const day = parseInt(parts[0], 10);
-              const month = parseInt(parts[1], 10) - 1;
-              let year = parseInt(parts[2], 10);
-              
-              // Handle 2-digit year (AA)
-              if (year < 100) {
-                year += 2000;
+          if (typeof val === 'string') {
+            const trimmed = val.trim();
+            if (trimmed === '') return null;
+
+            if (trimmed.includes('T')) {
+              const d = new Date(trimmed);
+              if (!isNaN(d.getTime())) return Timestamp.fromDate(d);
+            }
+
+            const datePart = trimmed.split(' ')[0];
+            if (datePart.includes('/') || datePart.includes('-')) {
+              const separator = datePart.includes('/') ? '/' : '-';
+              const parts = datePart.split(separator);
+              if (parts.length === 3) {
+                const first = parseInt(parts[0], 10);
+                const second = parseInt(parts[1], 10);
+                const third = parseInt(parts[2], 10);
+                
+                if (!isNaN(first) && !isNaN(second) && !isNaN(third)) {
+                  let day = first;
+                  let month = second - 1;
+                  let year = third;
+                  
+                  if (first > 1000) { // YYYY-MM-DD
+                    year = first;
+                    month = second - 1;
+                    day = third;
+                  }
+
+                  if (year < 100) { // 2-digit year
+                    year += 2000;
+                  }
+                  
+                  const date = new Date(year, month, day);
+                  if (!isNaN(date.getTime())) return Timestamp.fromDate(date);
+                }
               }
-              
-              const date = new Date(year, month, day);
-              if (!isNaN(date.getTime())) return Timestamp.fromDate(date);
             }
           }
 
-          // Handle Excel serial numbers (if cellDates: true didn't catch it)
           if (typeof val === 'number') {
-            // Excel dates start from 1900-01-01
             const date = new Date((val - 25569) * 86400 * 1000);
             if (!isNaN(date.getTime())) return Timestamp.fromDate(date);
           }
 
-          // Fallback to standard Date parsing
           const date = new Date(val);
           return isNaN(date.getTime()) ? null : Timestamp.fromDate(date);
         };
 
-        const pac = String(getVal(['PAC', 'Pacote', 'Lote', 'Identificação']) || '');
-        const periodoInicialVal = getVal(['PERÍODO INICIAL', 'Periodo Inicial', 'Data Inicial', 'Inicio']);
-        const periodoFinalVal = getVal(['PERÍODO FINAL', 'Periodo Final', 'Data Final', 'Fim']);
-        const numEnsaios = Number(getVal(['Nº DE ENSAIOS', 'Ensaios', 'Nº Ensaios', 'Quantidade']) || 0);
-        const statusVal = String(getVal(['status', 'Status', 'Situação']) || 'EM ABERTO');
-        const recebidoPor = String(getVal(['RECEBIDO POR', 'Recebido Por', 'Responsável']) || 'Sistema');
-        const recebidoEmVal = getVal(['recebido em', 'Recebido Em', 'Data Recebimento']);
+        const pac = cleanString(getVal(['PAC', 'Pacote', 'Lote', 'Identificação', 'Identificacao']));
+        const periodoInicialVal = getVal(['PERÍODO INICIAL', 'Periodo Inicial', 'Data Inicial', 'Inicio', 'Início', 'Data de Inicio', 'Data de Início']);
+        const periodoFinalVal = getVal(['PERÍODO FINAL', 'Periodo Final', 'Data Final', 'Fim', 'Data de Fim', 'Término', 'Termino']);
+        const numEnsaios = Number(getVal(['Nº DE ENSAIOS', 'Ensaios', 'Nº Ensaios', 'Quantidade', 'Nº de Ensaios', 'Numero de Ensaios', 'Num Ensaios']) || 0);
+
+        const statusVal = cleanString(getVal(['status', 'Status', 'Situação', 'Situacao']) || 'ABERTO');
+        const recebidoPor = cleanString(getVal(['RECEBIDO POR', 'Recebido Por', 'Responsável', 'Responsavel', 'Cadastrado Por']) || 'Sistema');
+        const recebidoEmVal = getVal(['recebido em', 'Recebido Em', 'Data Recebimento', 'Data de Recebimento', 'RecebidoNoDia']);
         
-        const lidoPor = String(getVal(['LIDO POR', 'Lido Por', 'Regularizado Por']) || '');
-        const lidoEmVal = getVal(['lido em', 'Lido Em', 'Regularizado Em', 'Data Regularização']);
+        const lidoPor = cleanString(getVal(['LIDO POR', 'Lido Por', 'Regularizado Por', 'Lido', 'LidoPor']));
+        const lidoEmVal = getVal(['lido em', 'Lido Em', 'Regularizado Em', 'Data Regularização', 'Data Regularizacao', 'Data Lido', 'LidoEm']);
         
-        const conferidoPor = String(getVal(['CONFERIDO POR', 'Conferido Por', 'Fechado Por']) || '');
-        const conferidoEmVal = getVal(['conferido em', 'Conferido Em', 'Fechado Em', 'Data Fechamento']);
+        const conferidoPor = cleanString(getVal(['CONFERIDO POR', 'Conferido Por', 'Fechado Por', 'Informado Por', 'Informado', 'Conferido', 'ConferidoPor', 'InformadoPor']));
+        const conferidoEmVal = getVal(['conferido em', 'Conferido Em', 'Fechado Em', 'Data Fechamento', 'Informado Em', 'InformadoEm', 'ConferidoEm']);
         
         const pInicial = parseExcelDate(periodoInicialVal);
         const pFinal = parseExcelDate(periodoFinalVal);
@@ -1474,8 +1661,22 @@ function ConfigPanel({
         const lEm = parseExcelDate(lidoEmVal);
         const cEm = parseExcelDate(conferidoEmVal);
 
-        // Auto-status logic: if workflow fields are filled from spreadsheet, status is FINALIZADO
-        let status = statusVal;
+        let status = 'ABERTO';
+        const rawStatus = statusVal.toUpperCase().trim();
+        if (rawStatus === 'ABERTO' || rawStatus === 'EM ABERTO' || rawStatus === 'ABERTA') {
+          status = 'ABERTO';
+        } else if (rawStatus === 'ALERTA') {
+          status = 'ALERTA';
+        } else if (rawStatus === 'ATRASO') {
+          status = 'ATRASO';
+        } else if (rawStatus === 'EM ANDAMENTO' || rawStatus === 'ANDAMENTO') {
+          status = 'EM ANDAMENTO';
+        } else if (rawStatus === 'FINALIZADO' || rawStatus === 'CONCLUÍDO' || rawStatus === 'CONCLUIDO' || rawStatus === 'FINALIZADA') {
+          status = 'FINALIZADO';
+        } else if (rawStatus) {
+          status = rawStatus;
+        }
+
         if (lidoPor && conferidoPor) {
           status = 'FINALIZADO';
         }
@@ -1491,45 +1692,268 @@ function ConfigPanel({
           lidoPor,
           lidoEm: lEm || (lidoPor ? Timestamp.now() : null),
           conferidoPor,
-          conferidoEm: cEm || (conferidoPor ? Timestamp.now() : null),
-          createdAt: Timestamp.now()
+          conferidoEm: cEm || (conferidoPor ? Timestamp.now() : null)
         };
 
         if (batchData.pac) {
-          if (isLocalMode) {
-            const newId = 'local-imp-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9);
-            importedLocalBatches.push({ id: newId, ...batchData } as Batch);
+          parsedItems.push(batchData);
+        }
+      }
+
+      if (parsedItems.length === 0) {
+        throw new Error('Nenhum lote válido com coluna "PAC" foi encontrado.');
+      }
+
+      const previewWithDuplicates = checkDuplicates(parsedItems, batches);
+      setPreviewItems(previewWithDuplicates);
+      setImportStatus({ 
+        type: 'info', 
+        message: `Sucesso! Extraímos ${previewWithDuplicates.length} registros. Por favor, revise os dados e decida sobre as duplicatas abaixo antes de salvar.` 
+      });
+    } catch (err: any) {
+      setImportStatus({ type: 'error', message: `Erro ao analisar dados: ${err.message}` });
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  const processExcelData = async (buffer: ArrayBuffer, isCsv = false) => {
+    try {
+      let data: any[] = [];
+      if (isCsv) {
+        data = parseCSV(buffer);
+      } else {
+        const workbook = read(buffer, { cellDates: true });
+        
+        let targetSheetName = workbook.SheetNames.find(name => 
+          name.trim().toUpperCase() === 'PRODUÇÃO' || 
+          name.trim().toUpperCase() === 'PRODUCAO'
+        );
+
+        if (!targetSheetName) {
+          if (workbook.SheetNames.length === 1) {
+            targetSheetName = workbook.SheetNames[0];
           } else {
-            await addDoc(collection(db, 'batches'), batchData);
+            throw new Error('A aba "PRODUÇÃO" não foi encontrada na planilha.');
           }
-          importedCount++;
+        }
+
+        const worksheet = workbook.Sheets[targetSheetName];
+        data = utils.sheet_to_json(worksheet) as any[];
+      }
+
+      await processParsedDataObjects(data);
+    } catch (err: any) {
+      setImportStatus({ type: 'error', message: `Erro ao processar arquivo: ${err.message}` });
+      setIsImporting(false);
+    }
+  };
+
+  const handlePastedImport = async () => {
+    if (!pastedInput.trim()) return;
+    setIsImporting(true);
+    setImportStatus({ type: 'info', message: 'Analisando dados colados...' });
+
+    try {
+      const lines = pastedInput.split(/\r?\n/).filter(line => line.trim() !== '');
+      if (lines.length === 0) {
+        throw new Error('Texto colado está vazio.');
+      }
+
+      const parsedRows = lines.map(line => {
+        if (line.includes('\t')) {
+          return line.split('\t');
+        } else if (line.includes(';')) {
+          return line.split(';');
+        } else if (line.includes(',')) {
+          return line.split(',');
+        } else {
+          const parts = line.split(/\s{2,}/);
+          if (parts.length > 1) {
+            return parts;
+          }
+          return [line];
+        }
+      });
+
+      const firstLine = parsedRows[0];
+      const isHeader = firstLine.some(cell => {
+        const c = String(cell).toLowerCase().trim();
+        return c === 'pac' || c.includes('período') || c.includes('periodo') || c.includes('ensaios') || c === 'status' || c.includes('recebido');
+      });
+
+      let headers: string[] = [];
+      let rawData: string[][] = [];
+
+      if (isHeader) {
+        headers = firstLine.map(h => h.trim());
+        rawData = parsedRows.slice(1);
+      } else {
+        headers = ['PAC', 'PERÍODO INICIAL', 'PERÍODO FINAL', 'Nº DE ENSAIOS', 'status', 'RECEBIDO POR', 'recebido em', 'LIDO POR', 'lido em', 'CONFERIDO POR', 'conferido em'];
+        rawData = parsedRows;
+      }
+
+      const dataObjects = rawData.map(row => {
+        const obj: any = {};
+        headers.forEach((header, idx) => {
+          obj[header] = row[idx] !== undefined ? row[idx].trim() : '';
+        });
+        return obj;
+      });
+
+      await processParsedDataObjects(dataObjects);
+    } catch (err: any) {
+      setImportStatus({ type: 'error', message: `Erro ao processar as células: ${err.message}` });
+      setIsImporting(false);
+    }
+  };
+
+  const handleSavePreview = async () => {
+    if (!previewItems || previewItems.length === 0) return;
+    setIsSavingPreview(true);
+    setImportStatus({ type: 'info', message: 'Salvando lotes no banco de dados...' });
+
+    try {
+      let importedCount = 0;
+      const foundPacs = new Set<string>();
+      const foundCollaborators = new Set<string>();
+      const foundStatuses = new Set<string>();
+
+      const batchesToSave = [...previewItems];
+      const importedLocalBatches: any[] = [];
+
+      const chunks: any[][] = [];
+      for (let i = 0; i < batchesToSave.length; i += 400) {
+        chunks.push(batchesToSave.slice(i, i + 400));
+      }
+
+      for (const chunk of chunks) {
+        if (isLocalMode) {
+          chunk.forEach(item => {
+            const newId = 'local-imp-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9);
+            const { id, isDuplicate, duplicateType, key, ...cleanData } = item;
+            importedLocalBatches.push({ id: newId, ...cleanData } as Batch);
+            importedCount++;
+
+            if (cleanData.pac) foundPacs.add(cleanData.pac);
+            if (cleanData.recebidoPor) foundCollaborators.add(cleanData.recebidoPor);
+            if (cleanData.lidoPor) foundCollaborators.add(cleanData.lidoPor);
+            if (cleanData.conferidoPor) foundCollaborators.add(cleanData.conferidoPor);
+            if (cleanData.status) foundStatuses.add(cleanData.status);
+          });
+        } else {
+          const batch = writeBatch(db);
+          chunk.forEach(item => {
+            const { id, isDuplicate, duplicateType, key, ...cleanData } = item;
+            const docRef = doc(collection(db, 'batches'));
+            batch.set(docRef, { ...cleanData, createdAt: Timestamp.now() });
+            importedCount++;
+
+            if (cleanData.pac) foundPacs.add(cleanData.pac);
+            if (cleanData.recebidoPor) foundCollaborators.add(cleanData.recebidoPor);
+            if (cleanData.lidoPor) foundCollaborators.add(cleanData.lidoPor);
+            if (cleanData.conferidoPor) foundCollaborators.add(cleanData.conferidoPor);
+            if (cleanData.status) foundStatuses.add(cleanData.status);
+          });
+          await batch.commit().catch(err => {
+            handleFirestoreError(err, OperationType.WRITE, 'batches');
+          });
         }
       }
 
       if (isLocalMode) {
-        // Enforce deserializing imported timestamps immediately for local mode
+        const currentPacNames = pacs.map((p: any) => p.name.trim().toLowerCase());
+        const currentCollabNames = collaborators.map((c: any) => c.name.trim().toLowerCase());
+        const currentStatusNames = statuses.map((s: any) => s.name.trim().toLowerCase());
+
+        let pacsUpdated = false;
+        let collabsUpdated = false;
+        let statusesUpdated = false;
+
+        const newPacsList = [...pacs];
+        const newCollabsList = [...collaborators];
+        const newStatusesList = [...statuses];
+
+        foundPacs.forEach(p => {
+          if (p && !currentPacNames.includes(p.toLowerCase())) {
+            newPacsList.push({ id: 'local-' + Date.now() + '-' + Math.random().toString(36).substring(2, 5), name: p });
+            pacsUpdated = true;
+          }
+        });
+
+        foundCollaborators.forEach(c => {
+          if (c && !currentCollabNames.includes(c.toLowerCase())) {
+            newCollabsList.push({ id: 'local-' + Date.now() + '-' + Math.random().toString(36).substring(2, 5), name: c });
+            collabsUpdated = true;
+          }
+        });
+
+        foundStatuses.forEach(s => {
+          if (s && !currentStatusNames.includes(s.toLowerCase())) {
+            newStatusesList.push({ id: 'local-' + Date.now() + '-' + Math.random().toString(36).substring(2, 5), name: s, color: '#6B7280' });
+            statusesUpdated = true;
+          }
+        });
+
+        if (pacsUpdated) {
+          const sorted = newPacsList.sort((a, b) => a.name.localeCompare(b.name));
+          setPacs(sorted);
+          localStorage.setItem('lotes_pacs', JSON.stringify(sorted));
+        }
+        if (collabsUpdated) {
+          const sorted = newCollabsList.sort((a, b) => a.name.localeCompare(b.name));
+          setCollaborators(sorted);
+          localStorage.setItem('lotes_collaborators', JSON.stringify(sorted));
+        }
+        if (statusesUpdated) {
+          const sorted = newStatusesList.sort((a, b) => a.name.localeCompare(b.name));
+          setStatuses(sorted);
+          localStorage.setItem('lotes_statuses', JSON.stringify(sorted));
+        }
+
         const finalizedLocalBatches = importedLocalBatches.map((b: any) => ({
           ...b,
           periodoInicial: parseLocalTimestamp(b.periodoInicial),
           periodoFinal: parseLocalTimestamp(b.periodoFinal),
           recebidoEm: parseLocalTimestamp(b.recebidoEm),
           lidoEm: parseLocalTimestamp(b.lidoEm),
-          conferidoEm: parseLocalTimestamp(b.conferidoEm)
+          conferidoEm: parseLocalTimestamp(b.conferidoEm),
+          createdAt: Timestamp.now()
         }));
         const updated = [...finalizedLocalBatches, ...batches];
         setBatches(updated);
         localStorage.setItem('lotes_batches', JSON.stringify(updated));
+      } else {
+        const currentPacNames = pacs.map((p: any) => p.name.trim().toLowerCase());
+        const currentCollabNames = collaborators.map((c: any) => c.name.trim().toLowerCase());
+        const currentStatusNames = statuses.map((s: any) => s.name.trim().toLowerCase());
+
+        for (const p of foundPacs) {
+          if (p && !currentPacNames.includes(p.toLowerCase())) {
+            await addDoc(collection(db, 'pacs'), { name: p });
+          }
+        }
+
+        for (const c of foundCollaborators) {
+          if (c && !currentCollabNames.includes(c.toLowerCase())) {
+            await addDoc(collection(db, 'collaborators'), { name: c });
+          }
+        }
+
+        for (const s of foundStatuses) {
+          if (s && !currentStatusNames.includes(s.toLowerCase())) {
+            await addDoc(collection(db, 'statuses'), { name: s, color: '#6B7280' });
+          }
+        }
       }
 
-      if (importedCount === 0 && data.length > 0) {
-        throw new Error('Nenhum lote foi importado. Verifique se os nomes das colunas na planilha estão corretos (ex: PAC, PERÍODO INICIAL).');
-      }
-
-      setImportStatus({ type: 'success', message: `${importedCount} lotes importados com sucesso!` });
+      setImportStatus({ type: 'success', message: `${importedCount} lotes importados e salvos com sucesso!` });
+      setPreviewItems(null);
+      setPastedInput('');
     } catch (err: any) {
-      setImportStatus({ type: 'error', message: `Erro ao processar: ${err.message}` });
+      setImportStatus({ type: 'error', message: `Erro ao salvar os lotes: ${err.message}` });
     } finally {
-      setIsImporting(false);
+      setIsSavingPreview(false);
     }
   };
 
@@ -1544,7 +1968,8 @@ function ConfigPanel({
       if (!response.ok) throw new Error('Não foi possível baixar o arquivo. Verifique se o link é público e permite download direto.');
       
       const buffer = await response.arrayBuffer();
-      await processExcelData(buffer);
+      const isCsv = importLink.toLowerCase().split('?')[0].split('#')[0].endsWith('.csv');
+      await processExcelData(buffer, isCsv);
     } catch (err: any) {
       setImportStatus({ 
         type: 'error', 
@@ -1563,7 +1988,8 @@ function ConfigPanel({
 
     try {
       const buffer = await file.arrayBuffer();
-      await processExcelData(buffer);
+      const isCsv = file.name.toLowerCase().endsWith('.csv');
+      await processExcelData(buffer, isCsv);
     } catch (err: any) {
       setImportStatus({ type: 'error', message: `Erro no upload: ${err.message}` });
       setIsImporting(false);
@@ -1725,11 +2151,154 @@ function ConfigPanel({
                 <label className="w-full cursor-pointer group">
                   <div className="flex flex-col items-center justify-center py-8 border-2 border-dashed border-[#e5e5e0] rounded-2xl group-hover:border-[#5A5A40]/40 transition-all bg-white">
                     <Upload className="text-[#5A5A40]/40 group-hover:text-[#5A5A40] mb-2 transition-colors" size={32} />
-                    <span className="text-sm font-medium text-[#5A5A40]/60 group-hover:text-[#5A5A40]">Clique para selecionar arquivo</span>
+                    <span className="text-sm font-medium text-[#5A5A40]/60 group-hover:text-[#5A5A40]">Clique para selecionar arquivo (.xlsx, .xls, .csv)</span>
                     <input type="file" className="hidden" accept=".xlsx,.xls,.csv" onChange={handleFileUpload} disabled={isImporting} />
                   </div>
                 </label>
               </div>
+
+              <div className="relative py-4">
+                <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-[#e5e5e0]"></div></div>
+                <div className="relative flex justify-center text-xs uppercase font-bold text-[#5A5A40]/40"><span className="bg-[#f5f5f0] px-2">Ou se preferir</span></div>
+              </div>
+
+              {/* Paste Cells Option */}
+              <div className="space-y-2 bg-white p-6 rounded-2xl border border-[#e5e5e0]">
+                <label className="text-xs font-bold uppercase text-[#5A5A40]">Colar Células Copiadas do Excel / Sheets</label>
+                <p className="text-xs text-[#5A5A40]/60">
+                  Selecione as células na sua planilha, copie (Ctrl+C) e cole (Ctrl+V) no campo abaixo.
+                  Utilizamos as colunas parâmetros de cabeçalho: <span className="font-mono bg-gray-100 px-1 rounded text-[11px]">PAC, PERÍODO INICIAL, PERÍODO FINAL, Nº DE ENSAIOS, status, RECEBIDO POR, recebido em, LIDO POR, lido em, CONFERIDO POR, conferido em</span>.
+                </p>
+                <textarea
+                  rows={5}
+                  placeholder="Cole aqui... Exemplo:&#10;LOTE-001	01/01/2026	10/01/2026	15	ABERTO	Operador 1"
+                  className="w-full p-4 bg-[#f5f5f0] border border-[#e5e5e0] rounded-xl text-xs font-mono focus:ring-2 focus:ring-[#5A5A40]/20 focus:outline-none"
+                  value={pastedInput}
+                  onChange={e => setPastedInput(e.target.value)}
+                />
+                <button
+                  onClick={handlePastedImport}
+                  disabled={isImporting || !pastedInput.trim()}
+                  className="w-full bg-[#5A5A40] text-white py-3 rounded-xl font-bold hover:bg-[#4a4a30] disabled:opacity-50 transition-all flex items-center justify-center gap-2"
+                >
+                  {isImporting ? <Loader2 className="animate-spin" size={18} /> : <Check size={18} />}
+                  Analisar e Importar Células Coladas
+                </button>
+              </div>
+
+              {/* Review and Preview Screen */}
+              {previewItems && (
+                <div className="bg-white rounded-2xl p-6 border border-[#e5e5e0] space-y-4 animate-in zoom-in-95 duration-200">
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-[#e5e5e0] pb-4">
+                    <div>
+                      <h4 className="font-display font-bold text-lg text-[#5A5A40]">Revisão de Dados Extraídos</h4>
+                      <p className="text-sm text-[#5A5A40]/70">
+                        Lotes identificados: <span className="font-bold text-[#5A5A40]">{previewItems.length}</span>. 
+                        Duplicatas: <span className="font-bold text-red-600">{previewItems.filter(item => item.isDuplicate).length}</span>.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2 w-full sm:w-auto">
+                      {previewItems.some(item => item.isDuplicate) && (
+                        <button
+                          onClick={handleAutoRemoveDuplicates}
+                          className="flex-1 sm:flex-initial bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold px-3 py-2 rounded-xl transition-all flex items-center justify-center gap-1"
+                          title="Filtra duplicados e mantém apenas cópias únicas não salvas"
+                        >
+                          <Trash2 size={14} />
+                          Remover Duplicados
+                        </button>
+                      )}
+                      <button
+                        onClick={handleSavePreview}
+                        disabled={isSavingPreview}
+                        className="flex-1 sm:flex-initial bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-4 py-2 rounded-xl transition-all flex items-center justify-center gap-1 disabled:opacity-50"
+                      >
+                        {isSavingPreview ? <Loader2 className="animate-spin" size={14} /> : <Check size={14} />}
+                        Salvar Lotes no Banco ({previewItems.length})
+                      </button>
+                      <button
+                        onClick={() => {
+                          setPreviewItems(null);
+                          setImportStatus(null);
+                        }}
+                        className="flex-1 sm:flex-initial bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-bold px-3 py-2 rounded-xl transition-all"
+                      >
+                        Descartar
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="border border-[#e5e5e0] rounded-xl overflow-hidden">
+                    <div className="max-h-96 overflow-y-auto overflow-x-auto">
+                      <table className="min-w-full divide-y divide-[#e5e5e0] text-xs text-left">
+                        <thead className="bg-[#f5f5f0] text-[#5A5A40] font-bold sticky top-0 z-10">
+                          <tr>
+                            <th className="p-3">PAC</th>
+                            <th className="p-3">Período Inicial</th>
+                            <th className="p-3">Período Final</th>
+                            <th className="p-3">Ensaios</th>
+                            <th className="p-3">Status</th>
+                            <th className="p-3">Tipo Duplicata</th>
+                            <th className="p-3 text-center">Ações</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-[#e5e5e0]">
+                          {previewItems.map((item, index) => {
+                            const rowId = item.id || `preview-row-${index}`;
+                            return (
+                              <tr 
+                                key={rowId}
+                                className={cn(
+                                  "hover:bg-gray-50/50 transition-colors",
+                                  item.isDuplicate ? "bg-red-50/80" : ""
+                                )}
+                              >
+                                <td className="p-3 font-mono font-bold text-gray-800">{item.pac}</td>
+                                <td className="p-3">{formatTimestamp(item.periodoInicial)}</td>
+                                <td className="p-3">{formatTimestamp(item.periodoFinal)}</td>
+                                <td className="p-3 font-mono">{item.numEnsaios}</td>
+                                <td className="p-3">
+                                  <span className="bg-gray-100 text-gray-700 px-2.5 py-0.5 rounded-full text-[10px] font-bold">
+                                    {item.status}
+                                  </span>
+                                </td>
+                                <td className="p-3">
+                                  {item.isDuplicate && (
+                                    <span className={cn(
+                                      "px-2 py-0.5 text-[9px] rounded-full font-extrabold uppercase tracking-wide",
+                                      item.duplicateType === 'database' 
+                                        ? "bg-amber-100 text-amber-800 border border-amber-200" 
+                                        : "bg-red-100 text-red-800 border border-red-200"
+                                    )}>
+                                      {item.duplicateType === 'database' ? 'Já no Banco' : 'Repetido na Planilha'}
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="p-3 text-center">
+                                  <button
+                                    onClick={() => {
+                                      const updatedList = previewItems.filter(p => p.id !== item.id);
+                                      const reCheckedList = checkDuplicates(
+                                        updatedList.map(({isDuplicate, duplicateType, key, ...rest}) => rest), 
+                                        batches
+                                      );
+                                      setPreviewItems(reCheckedList);
+                                    }}
+                                    className="text-red-500 hover:text-red-700 p-1 hover:bg-red-50 rounded-lg transition-colors inline-block"
+                                    title="Excluir esta linha para não importar"
+                                  >
+                                    <Trash2 size={15} />
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Danger Zone */}
               <div className="pt-8 border-t border-[#e5e5e0]">
