@@ -398,39 +398,6 @@ export default function App() {
           { id: 'c5', name: 'Paulo Henrique' },
           { id: 'c6', name: 'Renata Costa' }
         ];
-      }
-      // Ensure LUIZ CARLOS is in initialCollabs and rename/deduplicate LUIZ
-      let hasCollabChanges = false;
-      initialCollabs = initialCollabs.map((c: any) => {
-        if (c.name.trim().toUpperCase() === 'LUIZ') {
-          hasCollabChanges = true;
-          return { ...c, name: 'LUIZ CARLOS' };
-        }
-        return c;
-      });
-
-      const hasLuizLocal = initialCollabs.some((c: any) => c.name.toUpperCase().trim() === 'LUIZ CARLOS');
-      if (!hasLuizLocal) {
-        initialCollabs.push({ id: 'c-luiz', name: 'LUIZ CARLOS' });
-        hasCollabChanges = true;
-      }
-
-      // Deduplicate collaborators to prevent duplicates of 'LUIZ CARLOS'
-      const seenNames = new Set<string>();
-      const beforeCount = initialCollabs.length;
-      initialCollabs = initialCollabs.filter((c: any) => {
-        const norm = c.name.toUpperCase().trim();
-        if (seenNames.has(norm)) {
-          return false;
-        }
-        seenNames.add(norm);
-        return true;
-      });
-      if (initialCollabs.length !== beforeCount) {
-        hasCollabChanges = true;
-      }
-
-      if (hasCollabChanges) {
         localStorage.setItem('lotes_collaborators', JSON.stringify(initialCollabs));
       }
 
@@ -449,31 +416,7 @@ export default function App() {
 
       if (savedBatches) {
         const raw = JSON.parse(savedBatches);
-        let hasChanges = false;
-        const sanitizedRaw = raw.map((b: any) => {
-          let updatedRecPor = b.recebidoPor;
-          if (b.recebidoPor && b.recebidoPor.toUpperCase().trim() === 'LUIZ') {
-            updatedRecPor = 'LUIZ CARLOS';
-            hasChanges = true;
-          }
-          const statusUpper = (b.status || '').toUpperCase().trim();
-          const isTargetStatus = statusUpper === 'FINALIZADO' || statusUpper === 'ABERTO';
-          const isRecebidoPorBlank = !updatedRecPor || !updatedRecPor.trim();
-          if (isTargetStatus && isRecebidoPorBlank) {
-            updatedRecPor = 'LUIZ CARLOS';
-            hasChanges = true;
-          }
-          if (updatedRecPor !== b.recebidoPor) {
-            return { ...b, recebidoPor: updatedRecPor };
-          }
-          return b;
-        });
-
-        if (hasChanges) {
-          localStorage.setItem('lotes_batches', JSON.stringify(sanitizedRaw));
-        }
-
-        initialBatches = sanitizedRaw.map((b: any) => ({
+        initialBatches = raw.map((b: any) => ({
           ...b,
           periodoInicial: parseLocalTimestamp(b.periodoInicial),
           periodoFinal: parseLocalTimestamp(b.periodoFinal),
@@ -541,40 +484,7 @@ export default function App() {
 
     const unsubBatches = onSnapshot(
       query(collection(db, 'batches'), orderBy('recebidoEm', 'desc')),
-      (snapshot) => {
-        const docsMapped = snapshot.docs.map(d => {
-          const data = d.data();
-          let finalRecPor = data.recebidoPor || '';
-          let needsUpdate = false;
-
-          if (finalRecPor.toUpperCase().trim() === 'LUIZ') {
-            finalRecPor = 'LUIZ CARLOS';
-            needsUpdate = true;
-          }
-
-          const statusUpper = (data.status || '').toUpperCase().trim();
-          const isTargetStatus = statusUpper === 'FINALIZADO' || statusUpper === 'ABERTO';
-          const isRecebidoPorBlank = !finalRecPor || !finalRecPor.trim();
-          
-          if (isTargetStatus && isRecebidoPorBlank) {
-            finalRecPor = 'LUIZ CARLOS';
-            needsUpdate = true;
-          }
-
-          if (needsUpdate) {
-            updateDoc(doc(db, 'batches', d.id), { recebidoPor: finalRecPor }).catch(err => {
-              console.error("Auto-fixing recebidoPor failed for doc", d.id, err);
-            });
-            return {
-              id: d.id,
-              ...data,
-              recebidoPor: finalRecPor
-            } as Batch;
-          }
-          return { id: d.id, ...data, recebidoPor: finalRecPor } as Batch;
-        });
-        setBatches(docsMapped);
-      },
+      (snapshot) => setBatches(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Batch))),
       (err) => handleFirestoreError(err, OperationType.LIST, 'batches')
     );
 
@@ -586,32 +496,7 @@ export default function App() {
 
     const unsubCollabs = onSnapshot(
       query(collection(db, 'collaborators'), orderBy('name')),
-      (snapshot) => {
-        const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ConfigItem));
-        const hasLuizCarlos = list.some(c => c.name.toUpperCase().trim() === 'LUIZ CARLOS');
-        if (!hasLuizCarlos) {
-          addDoc(collection(db, 'collaborators'), { name: 'LUIZ CARLOS' }).catch(err => {
-            console.error("Failed to add LUIZ CARLOS in Firebase background", err);
-          });
-        }
-
-        // Rename collaborators with 'LUIZ' to 'LUIZ CARLOS', or delete if duplicate already exists
-        list.forEach(c => {
-          if (c.name.toUpperCase().trim() === 'LUIZ') {
-            if (hasLuizCarlos) {
-              deleteDoc(doc(db, 'collaborators', c.id)).catch(err => {
-                console.error("Failed to delete duplicate LUIZ", err);
-              });
-            } else {
-              updateDoc(doc(db, 'collaborators', c.id), { name: 'LUIZ CARLOS' }).catch(err => {
-                console.error("Failed to rename LUIZ to LUIZ CARLOS", err);
-              });
-            }
-          }
-        });
-
-        setCollaborators(list.filter(c => c.name.toUpperCase().trim() !== 'LUIZ'));
-      },
+      (snapshot) => setCollaborators(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ConfigItem))),
       (err) => handleFirestoreError(err, OperationType.LIST, 'collaborators')
     );
 
@@ -1386,37 +1271,15 @@ function BatchModal({ isOpen, onClose, batch, pacs, collaborators, statuses, han
         return isLocalMode ? LocalTimestamp.now() : Timestamp.now();
       };
 
-      let finalRecebidoPor = formData.recebidoPor.trim();
-      if (finalRecebidoPor.toUpperCase().trim() === 'LUIZ') {
-        finalRecebidoPor = 'LUIZ CARLOS';
-      }
-      const statusUpper = finalStatus.toUpperCase().trim();
-      if ((statusUpper === 'FINALIZADO' || statusUpper === 'ABERTO') && !finalRecebidoPor) {
-        finalRecebidoPor = 'LUIZ CARLOS';
-      }
-
-      let finalLidoPor = formData.lidoPor.trim();
-      if (finalLidoPor.toUpperCase().trim() === 'LUIZ') {
-        finalLidoPor = 'LUIZ CARLOS';
-      }
-
-      let finalConferidoPor = formData.conferidoPor.trim();
-      if (finalConferidoPor.toUpperCase().trim() === 'LUIZ') {
-        finalConferidoPor = 'LUIZ CARLOS';
-      }
-
       const data = {
         ...formData,
         status: finalStatus,
-        recebidoPor: finalRecebidoPor,
-        lidoPor: finalLidoPor,
-        conferidoPor: finalConferidoPor,
         numEnsaios: Number(formData.numEnsaios),
         periodoInicial: getTimestampFromDate(parseLocalDate(formData.periodoInicial)),
         periodoFinal: getTimestampFromDate(parseLocalDate(formData.periodoFinal)),
         recebidoEm: batch?.recebidoEm || getTimestampNow(),
-        lidoEm: finalLidoPor ? (batch?.lidoPor ? batch.lidoEm : getTimestampNow()) : null,
-        conferidoEm: finalConferidoPor ? (batch?.conferidoPor ? batch.conferidoEm : getTimestampNow()) : null,
+        lidoEm: formData.lidoPor.trim() ? (batch?.lidoPor ? batch.lidoEm : getTimestampNow()) : null,
+        conferidoEm: formData.conferidoPor.trim() ? (batch?.conferidoPor ? batch.conferidoEm : getTimestampNow()) : null,
       };
 
       if (isLocalMode) {
@@ -1867,22 +1730,13 @@ function ConfigPanel({
         const numEnsaios = Number(getVal(['Nº DE ENSAIOS', 'Ensaios', 'Nº Ensaios', 'Quantidade', 'Nº de Ensaios', 'Numero de Ensaios', 'Num Ensaios']) || 0);
 
         const statusVal = cleanString(getVal(['status', 'Status', 'Situação', 'Situacao']) || 'ABERTO');
-        let recebidoPor = cleanString(getVal(['RECEBIDO POR', 'Recebido Por', 'Responsável', 'Responsavel', 'Cadastrado Por']) || 'Sistema');
-        if (recebidoPor.toUpperCase().trim() === 'LUIZ') {
-          recebidoPor = 'LUIZ CARLOS';
-        }
+        const recebidoPor = cleanString(getVal(['RECEBIDO POR', 'Recebido Por', 'Responsável', 'Responsavel', 'Cadastrado Por']) || 'Sistema');
         const recebidoEmVal = getVal(['recebido em', 'Recebido Em', 'Data Recebimento', 'Data de Recebimento', 'RecebidoNoDia']);
         
-        let lidoPor = cleanString(getVal(['LIDO POR', 'Lido Por', 'Regularizado Por', 'Lido', 'LidoPor']));
-        if (lidoPor.toUpperCase().trim() === 'LUIZ') {
-          lidoPor = 'LUIZ CARLOS';
-        }
+        const lidoPor = cleanString(getVal(['LIDO POR', 'Lido Por', 'Regularizado Por', 'Lido', 'LidoPor']));
         const lidoEmVal = getVal(['lido em', 'Lido Em', 'Regularizado Em', 'Data Regularização', 'Data Regularizacao', 'Data Lido', 'LidoEm']);
         
-        let conferidoPor = cleanString(getVal(['CONFERIDO POR', 'Conferido Por', 'Fechado Por', 'Informado Por', 'Informado', 'Conferido', 'ConferidoPor', 'InformadoPor']));
-        if (conferidoPor.toUpperCase().trim() === 'LUIZ') {
-          conferidoPor = 'LUIZ CARLOS';
-        }
+        const conferidoPor = cleanString(getVal(['CONFERIDO POR', 'Conferido Por', 'Fechado Por', 'Informado Por', 'Informado', 'Conferido', 'ConferidoPor', 'InformadoPor']));
         const conferidoEmVal = getVal(['conferido em', 'Conferido Em', 'Fechado Em', 'Data Fechamento', 'Informado Em', 'InformadoEm', 'ConferidoEm']);
         
         const pInicial = parseExcelDate(periodoInicialVal);
@@ -1911,22 +1765,13 @@ function ConfigPanel({
           status = 'FINALIZADO';
         }
 
-        let finalRecebidoPor = recebidoPor;
-        if (finalRecebidoPor.toUpperCase().trim() === 'LUIZ') {
-          finalRecebidoPor = 'LUIZ CARLOS';
-        }
-        const statusUpper = status.toUpperCase().trim();
-        if ((statusUpper === 'FINALIZADO' || statusUpper === 'ABERTO') && (!finalRecebidoPor || !finalRecebidoPor.trim())) {
-          finalRecebidoPor = 'LUIZ CARLOS';
-        }
-
         const batchData = {
           pac,
           periodoInicial: pInicial || Timestamp.now(),
           periodoFinal: pFinal || Timestamp.now(),
           numEnsaios,
           status,
-          recebidoPor: finalRecebidoPor,
+          recebidoPor,
           recebidoEm: rEm || Timestamp.now(),
           lidoPor,
           lidoEm: lEm || (lidoPor ? Timestamp.now() : null),
