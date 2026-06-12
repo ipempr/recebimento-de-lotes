@@ -517,9 +517,12 @@ export default function App() {
   // Filtered Batches
   const filteredBatches = useMemo(() => {
     return batches.filter(b => {
-      const matchesSearch = b.pac.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        b.status.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        b.recebidoPor.toLowerCase().includes(searchTerm.toLowerCase());
+      const term = searchTerm.toLowerCase();
+      const matchesSearch = b.pac.toLowerCase().includes(term) ||
+        b.status.toLowerCase().includes(term) ||
+        (b.recebidoPor && b.recebidoPor.toLowerCase().includes(term)) ||
+        (b.lidoPor && b.lidoPor.toLowerCase().includes(term)) ||
+        (b.conferidoPor && b.conferidoPor.toLowerCase().includes(term));
       
       const deadline = addDays(b.periodoInicial.toDate(), 30);
       const daysRemaining = differenceInDays(deadline, new Date());
