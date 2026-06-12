@@ -541,7 +541,7 @@ export default function App() {
       }
       if (dashEndDate) {
         const end = startOfDay(parseLocalDate(dashEndDate));
-        if (startOfDay(b.periodoInicial.toDate()) > end) return false;
+        if (startOfDay(b.periodoFinal.toDate()) > end) return false;
       }
 
       return matchesSearch;
@@ -564,7 +564,7 @@ export default function App() {
       }
       if (dashEndDate) {
         const end = startOfDay(parseLocalDate(dashEndDate));
-        if (startOfDay(b.periodoInicial.toDate()) > end) match = false;
+        if (startOfDay(b.periodoFinal.toDate()) > end) match = false;
       }
 
       if (match) {
@@ -2527,30 +2527,7 @@ function StatsPanel({ batches, collaborators }: { batches: any[]; collaborators:
     return Array.from(new Set(list)).sort((a, b) => a.localeCompare(b));
   }, [collaborators, batches]);
 
-  // Filter batches based on inputs
-  const filtered = useMemo(() => {
-    return batches.filter(b => {
-      // Name filter: either lidoPor or conferidoPor contains the selectedCollab
-      if (selectedCollab) {
-        const matchesCollab = (b.lidoPor === selectedCollab) || (b.conferidoPor === selectedCollab);
-        if (!matchesCollab) return false;
-      }
-
-      // Period filters based on periodoInicial
-      if (statsStartDate) {
-        const start = startOfDay(parseLocalDate(statsStartDate));
-        if (b.periodoInicial.toDate() < start) return false;
-      }
-      if (statsEndDate) {
-        const end = startOfDay(parseLocalDate(statsEndDate));
-        if (startOfDay(b.periodoInicial.toDate()) > end) return false;
-      }
-
-      return true;
-    });
-  }, [batches, selectedCollab, statsStartDate, statsEndDate]);
-
-  // Compute stats on the filtered batches
+  // Compute stats on the batches directly to avoid filtering out work done on older batches
   const computedStats = useMemo(() => {
     const productivity: Record<string, { lido: number, informado: number }> = {};
     
@@ -2559,40 +2536,114 @@ function StatsPanel({ batches, collaborators }: { batches: any[]; collaborators:
     let totalEnsaiosFinished = 0;
     let totalEnsaiosOpen = 0;
 
-    filtered.forEach(b => {
-      if (!b.conferidoPor) {
-        totalEnsaiosOpen += b.numEnsaios;
-      }
+    const startLimit = statsStartDate ? startOfDay(parseLocalDate(statsStartDate)) : null;
+    const endLimit = statsEndDate ? startOfDay(parseLocalDate(statsEndDate)) : null;
 
-      // Track reading productivity
-      if (b.lidoPor) {
-        if (!selectedCollab || b.lidoPor === selectedCollab) {
-          if (!productivity[b.lidoPor]) productivity[b.lidoPor] = { lido: 0, informado: 0 };
-          productivity[b.lidoPor].lido += b.numEnsaios;
-        }
+    const toJSDate = (ts: any): Date | null => {
+      if (!ts) return null;
+      let d: Date;
+      if (ts.toDate && typeof ts.toDate === 'function') {
+        d = ts.toDate();
+      } else if (ts instanceof Date) {
+        d = ts;
+      } else if (typeof ts === 'string') {
+        d = new Date(ts);
+      } else if (ts.seconds) {
+        d = new Date(ts.seconds * 1000);
+      } else {
+        d = new Date(ts);
       }
+      return isNaN(d.getTime()) ? null : d;
+    };
 
-      // Track informing productivity
-      if (b.conferidoPor) {
-        if (!selectedCollab || b.conferidoPor === selectedCollab) {
-          if (!productivity[b.conferidoPor]) productivity[b.conferidoPor] = { lido: 0, informado: 0 };
-          productivity[b.conferidoPor].informado += b.numEnsaios;
-        }
+    batches.forEach(b => {
+      // 1. Reading Productivity (LIDO POR + lidoEm)
+      if (b.lidoPor && b.lidoPor.trim()) {
+        const lidoName = b.lidoPor.trim();
+        const lidoDate = toJSDate(b.lidoEm);
         
-        // Quality stats counts (onTime vs late)
-        if (!selectedCollab || b.conferidoPor === selectedCollab) {
-          totalEnsaiosFinished += b.numEnsaios;
-          const deadline = addDays(b.periodoInicial.toDate(), 30);
-          if (isAfter(b.conferidoEm!.toDate(), deadline)) {
-            lateCount++;
+        let matchCollab = !selectedCollab || lidoName === selectedCollab;
+        let matchPeriod = true;
+        if (lidoDate) {
+          if (startLimit && lidoDate < startLimit) matchPeriod = false;
+          if (endLimit && startOfDay(lidoDate) > endLimit) matchPeriod = false;
+        } else {
+          // If a period is specified but there's no date, we don't count it for that period
+          if (startLimit || endLimit) matchPeriod = false;
+        }
+
+        if (matchCollab && matchPeriod) {
+          if (!productivity[lidoName]) {
+            productivity[lidoName] = { lido: 0, informado: 0 };
+          }
+          productivity[lidoName].lido += Number(b.numEnsaios || 0);
+        }
+      }
+
+      // 2. Checking / Informing Productivity (CONFERIDO POR + conferidoEm)
+      if (b.conferidoPor && b.conferidoPor.trim()) {
+        const confName = b.conferidoPor.trim();
+        const confDate = toJSDate(b.conferidoEm);
+
+        let matchCollab = !selectedCollab || confName === selectedCollab;
+        let matchPeriod = true;
+        if (confDate) {
+          if (startLimit && confDate < startLimit) matchPeriod = false;
+          if (endLimit && startOfDay(confDate) > endLimit) matchPeriod = false;
+        } else {
+          if (startLimit || endLimit) matchPeriod = false;
+        }
+
+        if (matchCollab && matchPeriod) {
+          if (!productivity[confName]) {
+            productivity[confName] = { lido: 0, informado: 0 };
+          }
+          productivity[confName].informado += Number(b.numEnsaios || 0);
+
+          // Track Quality Stats (Only for matched and within-period checked batches)
+          totalEnsaiosFinished += Number(b.numEnsaios || 0);
+          
+          const deadlineDate = b.periodoInicial ? addDays(toJSDate(b.periodoInicial) || new Date(), 30) : null;
+          if (deadlineDate && confDate) {
+            if (isAfter(confDate, deadlineDate)) {
+              lateCount++;
+            } else {
+              onTimeCount++;
+            }
           } else {
             onTimeCount++;
           }
         }
       }
+
+      // 3. Open batches calculation (no conferidoPor)
+      if (!b.conferidoPor) {
+        const initDate = toJSDate(b.periodoInicial);
+        let matchPeriod = true;
+        if (initDate) {
+          if (startLimit && initDate < startLimit) matchPeriod = false;
+          if (endLimit && startOfDay(initDate) > endLimit) matchPeriod = false;
+        } else {
+          if (startLimit || endLimit) matchPeriod = false;
+        }
+
+        let matchCollab = true;
+        if (selectedCollab) {
+          matchCollab = (b.lidoPor && b.lidoPor.trim() === selectedCollab) || false;
+        }
+
+        if (matchCollab && matchPeriod) {
+          totalEnsaiosOpen += Number(b.numEnsaios || 0);
+        }
+      }
     });
 
-    // List the collaborators sorted alphabetically! "Listar os colaboradores por ordem alfabética."
+    // If a specific collaborator is filtered, make sure they show in list even with zero counts
+    if (selectedCollab && !productivity[selectedCollab]) {
+      productivity[selectedCollab] = { lido: 0, informado: 0 };
+    }
+
+    // List the collaborator's productivity sorted alphabetically
     const productivityList = Object.entries(productivity).sort((a, b) => {
       return a[0].localeCompare(b[0]);
     });
@@ -2607,7 +2658,7 @@ function StatsPanel({ batches, collaborators }: { batches: any[]; collaborators:
       totalEnsaiosFinished,
       totalEnsaiosOpen
     };
-  }, [filtered, selectedCollab]);
+  }, [batches, selectedCollab, statsStartDate, statsEndDate]);
 
   return (
     <div className="space-y-8 animate-in fade-in duration-200">
