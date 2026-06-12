@@ -544,34 +544,34 @@ export default function App() {
       (snapshot) => {
         const docsMapped = snapshot.docs.map(d => {
           const data = d.data();
-          let finalRecPor = data.recebidoPor || '';
-          let needsUpdate = false;
-
-          if (finalRecPor.toUpperCase().trim() === 'LUIZ') {
+          let finalRecPor = (data.recebidoPor || '').trim();
+          if (finalRecPor.toUpperCase() === 'LUIZ') {
             finalRecPor = 'LUIZ CARLOS';
-            needsUpdate = true;
           }
-
           const statusUpper = (data.status || '').toUpperCase().trim();
           const isTargetStatus = statusUpper === 'FINALIZADO' || statusUpper === 'ABERTO';
-          const isRecebidoPorBlank = !finalRecPor || !finalRecPor.trim();
-          
+          const isRecebidoPorBlank = !finalRecPor;
           if (isTargetStatus && isRecebidoPorBlank) {
             finalRecPor = 'LUIZ CARLOS';
-            needsUpdate = true;
           }
 
-          if (needsUpdate) {
-            updateDoc(doc(db, 'batches', d.id), { recebidoPor: finalRecPor }).catch(err => {
-              console.error("Auto-fixing recebidoPor failed for doc", d.id, err);
-            });
-            return {
-              id: d.id,
-              ...data,
-              recebidoPor: finalRecPor
-            } as Batch;
+          let finalLidoPor = (data.lidoPor || '').trim();
+          if (finalLidoPor.toUpperCase() === 'LUIZ') {
+            finalLidoPor = 'LUIZ CARLOS';
           }
-          return { id: d.id, ...data, recebidoPor: finalRecPor } as Batch;
+
+          let finalConferidoPor = (data.conferidoPor || '').trim();
+          if (finalConferidoPor.toUpperCase() === 'LUIZ') {
+            finalConferidoPor = 'LUIZ CARLOS';
+          }
+
+          return {
+            ...data,
+            id: d.id,
+            recebidoPor: finalRecPor,
+            lidoPor: finalLidoPor,
+            conferidoPor: finalConferidoPor
+          } as Batch;
         });
         setBatches(docsMapped);
       },
@@ -587,30 +587,33 @@ export default function App() {
     const unsubCollabs = onSnapshot(
       query(collection(db, 'collaborators'), orderBy('name')),
       (snapshot) => {
-        const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ConfigItem));
-        const hasLuizCarlos = list.some(c => c.name.toUpperCase().trim() === 'LUIZ CARLOS');
-        if (!hasLuizCarlos) {
-          addDoc(collection(db, 'collaborators'), { name: 'LUIZ CARLOS' }).catch(err => {
-            console.error("Failed to add LUIZ CARLOS in Firebase background", err);
-          });
-        }
+        const list = snapshot.docs.map(d => {
+          const data = d.data();
+          let name = (data.name || '').trim();
+          if (name.toUpperCase() === 'LUIZ') {
+            name = 'LUIZ CARLOS';
+          }
+          return { id: d.id, ...data, name } as ConfigItem;
+        });
 
-        // Rename collaborators with 'LUIZ' to 'LUIZ CARLOS', or delete if duplicate already exists
+        // Deduplicate collaborator names locally (case-insensitive mapping)
+        const seenNames = new Set<string>();
+        const uniqueList: ConfigItem[] = [];
+
         list.forEach(c => {
-          if (c.name.toUpperCase().trim() === 'LUIZ') {
-            if (hasLuizCarlos) {
-              deleteDoc(doc(db, 'collaborators', c.id)).catch(err => {
-                console.error("Failed to delete duplicate LUIZ", err);
-              });
-            } else {
-              updateDoc(doc(db, 'collaborators', c.id), { name: 'LUIZ CARLOS' }).catch(err => {
-                console.error("Failed to rename LUIZ to LUIZ CARLOS", err);
-              });
-            }
+          const norm = c.name.toUpperCase().trim();
+          if (norm && !seenNames.has(norm)) {
+            seenNames.add(norm);
+            uniqueList.push(c);
           }
         });
 
-        setCollaborators(list.filter(c => c.name.toUpperCase().trim() !== 'LUIZ'));
+        const hasLuizCarlos = seenNames.has('LUIZ CARLOS');
+        if (!hasLuizCarlos) {
+          uniqueList.push({ id: 'local-luiz-carlos', name: 'LUIZ CARLOS' });
+        }
+
+        setCollaborators(uniqueList.sort((a, b) => a.name.localeCompare(b.name)));
       },
       (err) => handleFirestoreError(err, OperationType.LIST, 'collaborators')
     );
@@ -628,6 +631,90 @@ export default function App() {
       unsubStatuses();
     };
   }, [user, isLocalMode]);
+
+  // Background migration for database normalization (runs exactly once per mount in online mode to prevent infinite sync loops)
+  const migrationRunRef = useRef(false);
+  useEffect(() => {
+    if (isLocalMode) return;
+    if (migrationRunRef.current) return;
+    migrationRunRef.current = true;
+
+    const runMigration = async () => {
+      try {
+        // 1. Migrate Collaborators
+        const collSnapshot = await getDocs(collection(db, 'collaborators'));
+        const colls = collSnapshot.docs.map(d => ({ id: d.id, ...d.data() } as any));
+        const hasLuizCarlos = colls.some(c => c.name.toUpperCase().trim() === 'LUIZ CARLOS');
+
+        if (!hasLuizCarlos) {
+          await addDoc(collection(db, 'collaborators'), { name: 'LUIZ CARLOS' });
+        }
+
+        for (const c of colls) {
+          const nameUpper = c.name.toUpperCase().trim();
+          if (nameUpper === 'LUIZ') {
+            if (hasLuizCarlos) {
+              await deleteDoc(doc(db, 'collaborators', c.id));
+            } else {
+              await updateDoc(doc(db, 'collaborators', c.id), { name: 'LUIZ CARLOS' });
+            }
+          }
+        }
+
+        // 2. Migrate Batches (Fix blank recebidoPor or LUIZ renamed to LUIZ CARLOS)
+        const batchSnapshot = await getDocs(collection(db, 'batches'));
+        const batchPromises = batchSnapshot.docs.map(async (d) => {
+          const data = d.data();
+          let finalRecPor = (data.recebidoPor || '').trim();
+          let finalLidoPor = (data.lidoPor || '').trim();
+          let finalConfPor = (data.conferidoPor || '').trim();
+          let needsUpdate = false;
+
+          if (finalRecPor.toUpperCase().trim() === 'LUIZ') {
+            finalRecPor = 'LUIZ CARLOS';
+            needsUpdate = true;
+          }
+
+          const statusUpper = (data.status || '').toUpperCase().trim();
+          const isTargetStatus = statusUpper === 'FINALIZADO' || statusUpper === 'ABERTO';
+          const isRecebidoPorBlank = !finalRecPor;
+
+          if (isTargetStatus && isRecebidoPorBlank) {
+            finalRecPor = 'LUIZ CARLOS';
+            needsUpdate = true;
+          }
+
+          if (finalLidoPor.toUpperCase().trim() === 'LUIZ') {
+            finalLidoPor = 'LUIZ CARLOS';
+            needsUpdate = true;
+          }
+
+          if (finalConfPor.toUpperCase().trim() === 'LUIZ') {
+            finalConfPor = 'LUIZ CARLOS';
+            needsUpdate = true;
+          }
+
+          if (needsUpdate) {
+            await updateDoc(doc(db, 'batches', d.id), {
+              recebidoPor: finalRecPor,
+              lidoPor: finalLidoPor,
+              conferidoPor: finalConfPor
+            });
+          }
+        });
+
+        await Promise.all(batchPromises);
+      } catch (err) {
+        console.error("Failed to run background database migration:", err);
+      }
+    };
+
+    const timer = setTimeout(() => {
+      runMigration();
+    }, 2000);
+
+    return () => clearTimeout(timer);
+  }, [isLocalMode]);
 
   // Filtered Batches
   const filteredBatches = useMemo(() => {
