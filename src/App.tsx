@@ -56,6 +56,20 @@ import { ptBR } from 'date-fns/locale';
 import { read, utils } from 'xlsx';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import {
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  LineChart,
+  Line,
+  AreaChart,
+  Area
+} from 'recharts';
 
 // Utility for tailwind classes
 function cn(...inputs: ClassValue[]) {
@@ -593,6 +607,7 @@ export default function App() {
     let lateCount = 0;
     let totalEnsaiosFinished = 0;
     let totalEnsaiosOpen = 0;
+    let totalEnsaiosReceived = 0;
 
     batches.forEach(b => {
       // Check if batch is within dashboard period filter
@@ -622,6 +637,21 @@ export default function App() {
           }
         }
       }
+
+      // Check if batch is within dashboard period filter using recebidoEm
+      let matchReceived = true;
+      if (dashStartDate) {
+        const start = startOfDay(parseLocalDate(dashStartDate));
+        if (b.recebidoEm.toDate() < start) matchReceived = false;
+      }
+      if (dashEndDate) {
+        const end = startOfDay(parseLocalDate(dashEndDate));
+        if (startOfDay(b.recebidoEm.toDate()) > end) matchReceived = false;
+      }
+
+      if (matchReceived) {
+        totalEnsaiosReceived += b.numEnsaios;
+      }
     });
 
     const totalFinished = onTimeCount + lateCount;
@@ -631,7 +661,8 @@ export default function App() {
       lateCount,
       totalFinished,
       totalEnsaiosFinished,
-      totalEnsaiosOpen
+      totalEnsaiosOpen,
+      totalEnsaiosReceived
     };
   }, [batches, dashStartDate, dashEndDate]);
 
@@ -866,7 +897,16 @@ export default function App() {
             </div>
 
             {/* Stats Overview */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+              <div className="bg-white p-6 rounded-[24px] border border-[#e5e5e0] flex items-center gap-4">
+                <div className="w-12 h-12 bg-blue-50 rounded-full flex items-center justify-center text-blue-600">
+                  <Download size={24} />
+                </div>
+                <div>
+                  <p className="text-xs font-bold uppercase text-[#5A5A40] opacity-60">Total Recebidos</p>
+                  <p className="text-2xl font-bold">{stats.totalEnsaiosReceived}</p>
+                </div>
+              </div>
               <div className="bg-white p-6 rounded-[24px] border border-[#e5e5e0] flex items-center gap-4">
                 <div className="w-12 h-12 bg-amber-50 rounded-full flex items-center justify-center text-amber-600">
                   <Clock size={24} />
@@ -881,12 +921,12 @@ export default function App() {
                   <CheckCircle2 size={24} />
                 </div>
                 <div>
-                  <p className="text-xs font-bold uppercase text-[#5A5A40] opacity-60">Finalizados (Mês)</p>
+                  <p className="text-xs font-bold uppercase text-[#5A5A40] opacity-60">Finalizados</p>
                   <p className="text-2xl font-bold">{stats.totalEnsaiosFinished}</p>
                 </div>
               </div>
               <div className="bg-white p-6 rounded-[24px] border border-[#e5e5e0] flex items-center gap-4">
-                <div className="w-12 h-12 bg-blue-50 rounded-full flex items-center justify-center text-blue-600">
+                <div className="w-12 h-12 bg-indigo-50 rounded-full flex items-center justify-center text-indigo-600">
                   <TrendingUp size={24} />
                 </div>
                 <div>
@@ -961,7 +1001,7 @@ export default function App() {
             </div>
           </>
         ) : activeTab === 'stats' ? (
-          <StatsPanel batches={batches} collaborators={collaborators} />
+          <StatsPanel batches={batches} collaborators={collaborators} pacs={pacs} />
         ) : (
           <ConfigPanel 
             pacs={pacs} 
@@ -2552,7 +2592,7 @@ function ConfigPanel({
 );
 }
 
-function StatsPanel({ batches, collaborators }: { batches: any[]; collaborators: any[] }) {
+function StatsPanel({ batches, collaborators, pacs }: { batches: any[]; collaborators: any[]; pacs: any[] }) {
   // Default filter dates: last 30 days
   const defaultStatsStart = useMemo(() => format(addDays(new Date(), -30), 'yyyy-MM-dd'), []);
   const defaultStatsEnd = useMemo(() => format(new Date(), 'yyyy-MM-dd'), []);
@@ -2946,6 +2986,351 @@ function StatsPanel({ batches, collaborators }: { batches: any[]; collaborators:
               </div>
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* Seção de Produtividade por PAC */}
+      <PacProductivitySection 
+        batches={batches} 
+        pacs={pacs} 
+        statsStartDate={statsStartDate} 
+        statsEndDate={statsEndDate} 
+        defaultStatsStart={defaultStatsStart} 
+        defaultStatsEnd={defaultStatsEnd} 
+      />
+    </div>
+  );
+}
+
+interface PacProductivitySectionProps {
+  batches: any[];
+  pacs: any[];
+  statsStartDate: string;
+  statsEndDate: string;
+  defaultStatsStart: string;
+  defaultStatsEnd: string;
+}
+
+function PacProductivitySection({
+  batches,
+  pacs,
+  statsStartDate,
+  statsEndDate,
+  defaultStatsStart,
+  defaultStatsEnd
+}: PacProductivitySectionProps) {
+  const [selectedPacFilter, setSelectedPacFilter] = useState<string>('all');
+  const [pacSortOrder, setPacSortOrder] = useState<'delivered_desc' | 'alphabetical'>('delivered_desc');
+
+  // Find all delivered batches in the stats period
+  const pacStats = useMemo(() => {
+    return batches.filter(b => {
+      const isFinished = b.conferidoPor && b.conferidoPor.trim() !== '';
+      if (!isFinished) return false;
+
+      if (statsStartDate) {
+        const start = startOfDay(parseLocalDate(statsStartDate));
+        if (b.periodoInicial.toDate() < start) return false;
+      }
+      if (statsEndDate) {
+        const end = startOfDay(parseLocalDate(statsEndDate));
+        if (startOfDay(b.periodoInicial.toDate()) > end) return false;
+      }
+      return true;
+    });
+  }, [batches, statsStartDate, statsEndDate]);
+
+  // Unique list of all PAC names (from config pacs AND batches to be absolutely exhaustive)
+  const allPacNames = useMemo(() => {
+    const fromConfig = pacs.map(p => p.name);
+    const fromBatches = batches.map(b => b.pac);
+    return Array.from(new Set([...fromConfig, ...fromBatches])).filter(Boolean).sort((a, b) => a.localeCompare(b));
+  }, [pacs, batches]);
+
+  // Grouped data when 'all' is selected
+  const pacGroupedData = useMemo(() => {
+    const list = allPacNames.map(pacName => {
+      const pacBatches = pacStats.filter(b => b.pac === pacName);
+      const totalEnsaios = pacBatches.reduce((acc, b) => acc + b.numEnsaios, 0);
+      const batchCount = pacBatches.length;
+      return {
+        pac: pacName,
+        totalEnsaios,
+        batchCount
+      };
+    });
+
+    // Sort list based on pacSortOrder
+    if (pacSortOrder === 'delivered_desc') {
+      list.sort((a, b) => b.totalEnsaios - a.totalEnsaios || a.pac.localeCompare(b.pac));
+    } else {
+      list.sort((a, b) => a.pac.localeCompare(b.pac));
+    }
+
+    return list;
+  }, [allPacNames, pacStats, pacSortOrder]);
+
+  // Determine scale/grouping type of selected dates
+  const rangeInDays = useMemo(() => {
+    const start = parseLocalDate(statsStartDate || defaultStatsStart);
+    const end = parseLocalDate(statsEndDate || defaultStatsEnd);
+    return differenceInDays(end, start);
+  }, [statsStartDate, statsEndDate, defaultStatsStart, defaultStatsEnd]);
+
+  const groupingType = useMemo<'day' | 'month' | 'year'>(() => {
+    if (rangeInDays <= 31) {
+      return 'day';
+    } else if (rangeInDays <= 365) {
+      return 'month';
+    } else {
+      return 'year';
+    }
+  }, [rangeInDays]);
+
+  // Helper inside component to get formatted dates
+  const getGroupKeyAndLabel = (date: Date, type: 'day' | 'month' | 'year') => {
+    if (type === 'day') {
+      return {
+        key: format(date, 'yyyy-MM-dd'),
+        label: format(date, 'dd/MM/yyyy', { locale: ptBR })
+      };
+    } else if (type === 'month') {
+      return {
+        key: format(date, 'yyyy-MM'),
+        label: format(date, "MMMM 'de' yyyy", { locale: ptBR })
+      };
+    } else {
+      return {
+        key: format(date, 'yyyy'),
+        label: format(date, 'yyyy')
+      };
+    }
+  };
+
+  // Grouped data when a specific PAC is selected
+  const specificPacData = useMemo(() => {
+    if (selectedPacFilter === 'all') return [];
+
+    const pacBatchesInPeriod = pacStats.filter(b => b.pac === selectedPacFilter);
+    
+    // Group them
+    const groups: Record<string, { key: string, label: string, totalEnsaios: number, batchCount: number, dateObj: Date }> = {};
+    
+    pacBatchesInPeriod.forEach(b => {
+      const date = b.periodoInicial.toDate();
+      const { key, label } = getGroupKeyAndLabel(date, groupingType);
+      if (!groups[key]) {
+        groups[key] = {
+          key,
+          label,
+          totalEnsaios: 0,
+          batchCount: 0,
+          dateObj: date
+        };
+      }
+      groups[key].totalEnsaios += b.numEnsaios;
+      groups[key].batchCount += 1;
+    });
+
+    // Sort chronologically
+    return Object.values(groups).sort((a, b) => a.dateObj.getTime() - b.dateObj.getTime());
+  }, [pacStats, selectedPacFilter, groupingType]);
+
+  // Render BarChart of PACs
+  const renderAllPacsChart = () => {
+    const chartData = pacGroupedData.filter(d => d.totalEnsaios > 0);
+    if (chartData.length === 0) {
+      return (
+        <div className="flex items-center justify-center h-64 bg-gray-50 border border-dashed border-[#e5e5e0] rounded-2xl text-xs text-[#5A5A40]/60 italic">
+          Nenhuma entrega registrada para plotar o gráfico.
+        </div>
+      );
+    }
+
+    return (
+      <div className="h-72 w-full mt-4">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={chartData} margin={{ top: 20, right: 30, left: 10, bottom: 40 }}>
+            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E5E0" />
+            <XAxis 
+              dataKey="pac" 
+              tick={{ fill: '#5A5A40', fontSize: 10 }}
+              axisLine={{ stroke: '#E5E5E0' }}
+              tickLine={{ stroke: '#E5E5E0' }}
+              interval={0}
+              angle={-25}
+              textAnchor="end"
+            />
+            <YAxis tick={{ fill: '#5A5A40', fontSize: 11 }} axisLine={false} tickLine={false} />
+            <Tooltip 
+              contentStyle={{ backgroundColor: 'white', borderRadius: '16px', border: '1px solid #E5E5E0', fontSize: '12px' }}
+              labelStyle={{ fontWeight: 'bold', color: '#1a1a1a' }}
+            />
+            <Bar dataKey="totalEnsaios" name="Ensaios Entregues" fill="#5A5A40" radius={[8, 8, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    );
+  };
+
+  const renderSpecificPacChart = () => {
+    const chartData = specificPacData;
+    if (chartData.length <= 1) {
+      return (
+        <div className="flex flex-col items-center justify-center p-8 h-64 bg-gray-50 border border-dashed border-[#e5e5e0] rounded-2xl text-xs text-[#5A5A40]/60 text-center leading-normal">
+          <Clock size={32} className="text-[#5A5A40]/30 mb-2" />
+          <span>Dados insuficientes para exibição do gráfico evolutivo.</span>
+          <span className="opacity-75 mt-1">O gráfico de evolução requer entregas registradas em pelo menos 2 períodos diferentes (ex: meses ou dias distintos).</span>
+        </div>
+      );
+    }
+
+    return (
+      <div className="h-72 w-full mt-4">
+        <ResponsiveContainer width="100%" height="100%">
+          <AreaChart data={chartData} margin={{ top: 20, right: 30, left: 10, bottom: 20 }}>
+            <defs>
+              <linearGradient id="colorEnsaios" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#10b981" stopOpacity={0.2}/>
+                <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+              </linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E5E0" />
+            <XAxis 
+              dataKey="label" 
+              tick={{ fill: '#5A5A40', fontSize: 10 }}
+              axisLine={{ stroke: '#E5E5E0' }}
+              tickLine={{ stroke: '#E5E5E0' }}
+            />
+            <YAxis tick={{ fill: '#5A5A40', fontSize: 11 }} axisLine={false} tickLine={false} />
+            <Tooltip 
+              contentStyle={{ backgroundColor: 'white', borderRadius: '16px', border: '1px solid #E5E5E0', fontSize: '12px' }}
+              labelStyle={{ fontWeight: 'bold', color: '#1a1a1a' }}
+            />
+            <Area type="monotone" dataKey="totalEnsaios" name="Ensaios Entregues" stroke="#10b981" fillOpacity={1} fill="url(#colorEnsaios)" strokeWidth={3} />
+          </AreaChart>
+        </ResponsiveContainer>
+      </div>
+    );
+  };
+
+  return (
+    <div className="bg-white rounded-[32px] p-8 border border-[#e5e5e0] mt-8">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-[#f5f5f0] pb-6 mb-6">
+        <div>
+          <div className="flex items-center gap-3">
+            <BarChart3 className="text-[#5A5A40]" size={24} />
+            <h3 className="text-xl font-display font-bold tracking-tight">Produtividade por PAC</h3>
+          </div>
+          <p className="text-xs text-[#5A5A40]/60 mt-1">
+            Total de ensaios entregues (finalizados/informados) agrupados por PAC no período selecionado.
+          </p>
+        </div>
+
+        {/* Filters specific to PAC Productivity */}
+        <div className="flex flex-wrap items-center gap-4">
+          <div className="space-y-1">
+            <label className="text-[10px] font-bold uppercase text-[#5A5A40] opacity-60 block">Filtrar PAC</label>
+            <select
+              className="px-3 py-2 bg-[#f5f5f0] border-none rounded-xl text-xs focus:ring-2 focus:ring-[#5A5A40]/20 focus:outline-none font-bold text-[#5A5A40]"
+              value={selectedPacFilter}
+              onChange={(e) => setSelectedPacFilter(e.target.value)}
+            >
+              <option value="all">Todos os PACs</option>
+              {allPacNames.map(pac => (
+                <option key={pac} value={pac}>{pac}</option>
+              ))}
+            </select>
+          </div>
+
+          {selectedPacFilter === 'all' && (
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold uppercase text-[#5A5A40] opacity-60 block">Ordenação</label>
+              <select
+                className="px-3 py-2 bg-[#f5f5f0] border-none rounded-xl text-xs focus:ring-2 focus:ring-[#5A5A40]/20 focus:outline-none font-bold text-[#5A5A40]"
+                value={pacSortOrder}
+                onChange={(e) => setPacSortOrder(e.target.value as any)}
+              >
+                <option value="delivered_desc">Ensaios Entregues (Maior para Menor)</option>
+                <option value="alphabetical">Ordem Alfabética</option>
+              </select>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        {/* Table Column */}
+        <div className="overflow-x-auto">
+          {selectedPacFilter === 'all' ? (
+            <table className="w-full text-left">
+              <thead>
+                <tr className="text-[10px] uppercase font-bold text-[#5A5A40] opacity-50 border-b border-[#e5e5e0]">
+                  <th className="pb-4">PAC</th>
+                  <th className="pb-4 text-center">Quantidade de Lotes</th>
+                  <th className="pb-4 text-center">Ensaios Entregues</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#f5f5f0]">
+                {pacGroupedData.map((row) => (
+                  <tr key={row.pac} className="group hover:bg-[#f5f5f0]/50 transition-colors">
+                    <td className="py-4 font-medium text-sm">{row.pac}</td>
+                    <td className="py-4 text-center text-xs text-[#5A5A40]/80 font-medium">{row.batchCount}</td>
+                    <td className="py-4 text-center">
+                      <span className="px-2 py-1 bg-[#5A5A40]/10 text-[#5A5A40] rounded-lg text-xs font-bold">
+                        {row.totalEnsaios}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+                {pacGroupedData.length === 0 && (
+                  <tr>
+                    <td colSpan={3} className="py-8 text-center text-xs text-[#5A5A40] opacity-60 italic">
+                      Nenhum PAC cadastrado ou com entregas no período.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          ) : (
+            <table className="w-full text-left">
+              <thead>
+                <tr className="text-[10px] uppercase font-bold text-[#5A5A40] opacity-50 border-b border-[#e5e5e0]">
+                  <th className="pb-4">Período ({groupingType === 'day' ? 'Dia' : groupingType === 'month' ? 'Mês' : 'Ano'})</th>
+                  <th className="pb-4 text-center">Quantidade de Lotes</th>
+                  <th className="pb-4 text-center">Ensaios Entregues</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#f5f5f0]">
+                {specificPacData.map((row) => (
+                  <tr key={row.key} className="group hover:bg-[#f5f5f0]/50 transition-colors">
+                    <td className="py-4 font-medium text-sm capitalize">{row.label}</td>
+                    <td className="py-4 text-center text-xs text-[#5A5A40]/80 font-medium">{row.batchCount}</td>
+                    <td className="py-4 text-center">
+                      <span className="px-2 py-1 bg-emerald-50 text-emerald-700 rounded-lg text-xs font-bold">
+                        {row.totalEnsaios}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+                {specificPacData.length === 0 && (
+                  <tr>
+                    <td colSpan={3} className="py-8 text-center text-xs text-[#5A5A40] opacity-60 italic">
+                      Nenhuma entrega de ensaio registrada para {selectedPacFilter} no período selecionado.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        {/* Chart Column */}
+        <div className="flex flex-col justify-center">
+          <h4 className="text-xs font-bold uppercase tracking-wider text-[#5A5A40] opacity-75 mb-2">
+            {selectedPacFilter === 'all' ? 'Comparativo de Entregas por PAC' : `Gráfico Evolutivo: ${selectedPacFilter}`}
+          </h4>
+          {selectedPacFilter === 'all' ? renderAllPacsChart() : renderSpecificPacChart()}
         </div>
       </div>
     </div>
