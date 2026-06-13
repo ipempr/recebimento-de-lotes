@@ -541,7 +541,7 @@ export default function App() {
       }
       if (dashEndDate) {
         const end = startOfDay(parseLocalDate(dashEndDate));
-        if (startOfDay(b.periodoFinal.toDate()) > end) return false;
+        if (startOfDay(b.periodoInicial.toDate()) > end) return false;
       }
 
       return matchesSearch;
@@ -564,7 +564,7 @@ export default function App() {
       }
       if (dashEndDate) {
         const end = startOfDay(parseLocalDate(dashEndDate));
-        if (startOfDay(b.periodoFinal.toDate()) > end) match = false;
+        if (startOfDay(b.periodoInicial.toDate()) > end) match = false;
       }
 
       if (match) {
@@ -2536,14 +2536,14 @@ function StatsPanel({ batches, collaborators }: { batches: any[]; collaborators:
         if (!matchesCollab) return false;
       }
 
-      // Period filters based on period limit
+      // Period filters based on periodoInicial
       if (statsStartDate) {
         const start = startOfDay(parseLocalDate(statsStartDate));
         if (b.periodoInicial.toDate() < start) return false;
       }
       if (statsEndDate) {
         const end = startOfDay(parseLocalDate(statsEndDate));
-        if (startOfDay(b.periodoFinal.toDate()) > end) return false;
+        if (startOfDay(b.periodoInicial.toDate()) > end) return false;
       }
 
       return true;
