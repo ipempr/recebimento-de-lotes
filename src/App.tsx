@@ -514,6 +514,45 @@ export default function App() {
     };
   }, [user, isLocalMode]);
 
+  // Autocorrect batches where recebidoPor is blank or "LUIZ", replacing with "LUIZ CARLOS"
+  useEffect(() => {
+    if (!user || batches.length === 0) return;
+    
+    const batchesNeedFix = batches.filter(b => {
+      const rec = b.recebidoPor ? b.recebidoPor.trim().toUpperCase() : '';
+      return rec === '' || rec === 'LUIZ';
+    });
+    
+    if (batchesNeedFix.length === 0) return;
+    
+    const runFix = async () => {
+      if (isLocalMode) {
+        const updated = batches.map(b => {
+          const rec = b.recebidoPor ? b.recebidoPor.trim().toUpperCase() : '';
+          if (rec === '' || rec === 'LUIZ') {
+            return { ...b, recebidoPor: 'LUIZ CARLOS' };
+          }
+          return b;
+        });
+        setBatches(updated);
+        localStorage.setItem('lotes_batches', JSON.stringify(updated));
+      } else {
+        try {
+          const batchUpdate = writeBatch(db);
+          batchesNeedFix.forEach(b => {
+            const docRef = doc(db, 'batches', b.id);
+            batchUpdate.update(docRef, { recebidoPor: 'LUIZ CARLOS' });
+          });
+          await batchUpdate.commit();
+        } catch (err) {
+          console.error("Erro ao corrigir recebidoPor no Firestore:", err);
+        }
+      }
+    };
+    
+    runFix();
+  }, [user, batches, isLocalMode]);
+
   // Filtered Batches
   const filteredBatches = useMemo(() => {
     return batches.filter(b => {
@@ -521,11 +560,11 @@ export default function App() {
         b.status.toLowerCase().includes(searchTerm.toLowerCase()) ||
         b.recebidoPor.toLowerCase().includes(searchTerm.toLowerCase());
       
+      const isFinished = !!b.conferidoPor && b.conferidoPor.trim() !== '';
       const deadline = addDays(b.periodoInicial.toDate(), 30);
       const daysRemaining = differenceInDays(deadline, new Date());
-      const isOverdue = isAfter(new Date(), deadline);
-      const isWarning = !isOverdue && daysRemaining <= 10;
-      const isFinished = !!b.conferidoPor;
+      const isOverdue = !isFinished && isAfter(new Date(), deadline);
+      const isWarning = !isFinished && !isOverdue && daysRemaining <= 10;
 
       // Status Filter Logic
       if (statusFilter === 'open' && isFinished) return false;
@@ -568,7 +607,8 @@ export default function App() {
       }
 
       if (match) {
-        if (!b.conferidoPor) {
+        const hasInformado = b.conferidoPor && b.conferidoPor.trim() !== '';
+        if (!hasInformado) {
           totalEnsaiosOpen += b.numEnsaios;
         } else {
           totalEnsaiosFinished += b.numEnsaios;
@@ -1041,12 +1081,13 @@ function BatchCard({ batch, onEdit, onDelete }: any) {
   const formatPeriod = (ts: Timestamp) => format(ts.toDate(), "dd/MM/yyyy", { locale: ptBR });
 
   // Deadline Logic
+  const isFinished = !!batch.conferidoPor && batch.conferidoPor.trim() !== '';
   const deadline = addDays(batch.periodoInicial.toDate(), 30);
   const daysRemaining = differenceInDays(deadline, new Date());
-  const isOverdue = isAfter(new Date(), deadline);
-  const isWarning = !isOverdue && daysRemaining <= 10;
+  const isOverdue = !isFinished && isAfter(new Date(), deadline);
+  const isWarning = !isFinished && !isOverdue && daysRemaining <= 10;
 
-  const dynamicStatus = isOverdue ? 'EM ATRASO' : isWarning ? 'ALERTA' : batch.status;
+  const dynamicStatus = isFinished ? 'FINALIZADO' : isOverdue ? 'EM ATRASO' : isWarning ? 'ALERTA' : batch.status;
 
   return (
     <div className={cn(
@@ -1245,17 +1286,14 @@ function BatchModal({ isOpen, onClose, batch, pacs, collaborators, statuses, han
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Auto-status logic: if "Lido" and "Informado" fields are filled, status becomes FINALIZADO automatically
+    // Auto-status logic: if "Informado" field is filled, status becomes FINALIZADO automatically. If not, fallback to default status
+    const hasInformado = formData.conferidoPor && formData.conferidoPor.trim() !== '';
     let finalStatus = formData.status;
-    if (formData.lidoPor.trim() && formData.conferidoPor.trim()) {
+    if (hasInformado) {
       finalStatus = 'FINALIZADO';
-    }
-
-    // Validation for FINALIZADO status
-    if (finalStatus === 'FINALIZADO') {
-      if (!formData.lidoPor.trim() || !formData.conferidoPor.trim()) {
-        setLocalError('Para definir como FINALIZADO, é necessário informar quem Leu e Informou.');
-        return;
+    } else {
+      if (finalStatus === 'FINALIZADO') {
+        finalStatus = 'ABERTO';
       }
     }
 
@@ -1758,8 +1796,10 @@ function ConfigPanel({
           status = rawStatus;
         }
 
-        if (lidoPor && conferidoPor) {
+        if (conferidoPor && conferidoPor.trim() !== '') {
           status = 'FINALIZADO';
+        } else if (status === 'FINALIZADO') {
+          status = 'ABERTO';
         }
 
         const batchData = {
@@ -2513,19 +2553,61 @@ function ConfigPanel({
 }
 
 function StatsPanel({ batches, collaborators }: { batches: any[]; collaborators: any[] }) {
-  const [selectedCollab, setSelectedCollab] = useState<string>('');
-  const [statsStartDate, setStatsStartDate] = useState<string>('');
-  const [statsEndDate, setStatsEndDate] = useState<string>('');
+  // Default filter dates: last 30 days
+  const defaultStatsStart = useMemo(() => format(addDays(new Date(), -30), 'yyyy-MM-dd'), []);
+  const defaultStatsEnd = useMemo(() => format(new Date(), 'yyyy-MM-dd'), []);
 
-  // Get unique list of collaborators alphabetically
-  const uniqueCollabsAlphabetical = useMemo(() => {
-    const list = collaborators.map((c: any) => c.name);
+  const [selectedCollab, setSelectedCollab] = useState<string>('');
+  const [filterPreset, setFilterPreset] = useState<'30days' | 'period' | 'year' | 'month'>('30days');
+  const [statsStartDate, setStatsStartDate] = useState<string>(defaultStatsStart);
+  const [statsEndDate, setStatsEndDate] = useState<string>(defaultStatsEnd);
+
+  const currentYear = new Date().getFullYear();
+  const [selectedYear, setSelectedYear] = useState<number>(currentYear);
+  const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth()); // 0-indexed
+
+  // Synchronize start and end dates based on filter preset
+  useEffect(() => {
+    if (filterPreset === '30days') {
+      setStatsStartDate(format(addDays(new Date(), -30), 'yyyy-MM-dd'));
+      setStatsEndDate(format(new Date(), 'yyyy-MM-dd'));
+    } else if (filterPreset === 'year') {
+      setStatsStartDate(`${selectedYear}-01-01`);
+      setStatsEndDate(`${selectedYear}-12-31`);
+    } else if (filterPreset === 'month') {
+      const firstDay = format(new Date(selectedYear, selectedMonth, 1), 'yyyy-MM-dd');
+      const lastDay = format(new Date(selectedYear, selectedMonth + 1, 0), 'yyyy-MM-dd');
+      setStatsStartDate(firstDay);
+      setStatsEndDate(lastDay);
+    }
+  }, [filterPreset, selectedYear, selectedMonth]);
+
+  // Compute unique list of collaborators with actual production in the filtered period
+  const collabsWithProductionInPeriod = useMemo(() => {
+    const list: string[] = [];
     batches.forEach(b => {
-      if (b.lidoPor && !list.includes(b.lidoPor)) list.push(b.lidoPor);
-      if (b.conferidoPor && !list.includes(b.conferidoPor)) list.push(b.conferidoPor);
+      // Check date range
+      let inRange = true;
+      if (statsStartDate) {
+        const start = startOfDay(parseLocalDate(statsStartDate));
+        if (b.periodoInicial.toDate() < start) inRange = false;
+      }
+      if (statsEndDate) {
+        const end = startOfDay(parseLocalDate(statsEndDate));
+        if (startOfDay(b.periodoInicial.toDate()) > end) inRange = false;
+      }
+
+      if (inRange) {
+        if (b.lidoPor && b.lidoPor.trim() !== '') {
+          list.push(b.lidoPor.trim());
+        }
+        if (b.conferidoPor && b.conferidoPor.trim() !== '') {
+          list.push(b.conferidoPor.trim());
+        }
+      }
     });
     return Array.from(new Set(list)).sort((a, b) => a.localeCompare(b));
-  }, [collaborators, batches]);
+  }, [batches, statsStartDate, statsEndDate]);
 
   // Filter batches based on inputs
   const filtered = useMemo(() => {
@@ -2592,7 +2674,6 @@ function StatsPanel({ batches, collaborators }: { batches: any[]; collaborators:
       }
     });
 
-    // List the collaborators sorted alphabetically! "Listar os colaboradores por ordem alfabética."
     const productivityList = Object.entries(productivity).sort((a, b) => {
       return a[0].localeCompare(b[0]);
     });
@@ -2613,56 +2694,173 @@ function StatsPanel({ batches, collaborators }: { batches: any[]; collaborators:
     <div className="space-y-8 animate-in fade-in duration-200">
       {/* Filtros da Tela Estatísticas */}
       <div className="bg-white p-6 rounded-[32px] border border-[#e5e5e0]">
-        <div className="flex flex-col lg:flex-row gap-6 items-end justify-between">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 flex-1 w-full">
-            {/* Filtro por Colaborador */}
-            <div className="space-y-2">
-              <label className="text-xs font-bold uppercase text-[#5A5A40]">Filtar por Colaborador</label>
-              <select
-                className="w-full p-3 bg-[#f5f5f0] border-none rounded-xl text-sm focus:ring-2 focus:ring-[#5A5A40]/20 focus:outline-none font-medium text-gray-700"
-                value={selectedCollab}
-                onChange={(e) => setSelectedCollab(e.target.value)}
+        <div className="space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#f5f5f0] pb-4">
+            <div className="space-y-1">
+              <h3 className="text-sm font-bold uppercase tracking-wider text-[#5A5A40]">Filtros de Estatística</h3>
+              <p className="text-xs text-[#5A5A40]/60">Selecione o período de análise de produtividade e qualidade.</p>
+            </div>
+            <div className="flex flex-wrap gap-1 bg-[#f5f5f0] p-1 rounded-xl">
+              <button
+                onClick={() => setFilterPreset('30days')}
+                className={cn(
+                  "px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
+                  filterPreset === '30days' ? "bg-white text-[#5A5A40] shadow-sm" : "text-[#5A5A40]/60 hover:text-[#5A5A40]"
+                )}
               >
-                <option value="">Todos os Colaboradores</option>
-                {uniqueCollabsAlphabetical.map(name => (
-                  <option key={name} value={name}>{name}</option>
-                ))}
-              </select>
-            </div>
-            {/* Período Inicial */}
-            <div className="space-y-2">
-              <label className="text-xs font-bold uppercase text-[#5A5A40]">Período Inicial (Filtro)</label>
-              <input
-                type="date"
-                className="w-full p-3 bg-[#f5f5f0] border-none rounded-xl text-sm focus:ring-2 focus:ring-[#5A5A40]/20 focus:outline-none font-medium text-gray-700"
-                value={statsStartDate}
-                onChange={(e) => setStatsStartDate(e.target.value)}
-              />
-            </div>
-            {/* Período Final */}
-            <div className="space-y-2">
-              <label className="text-xs font-bold uppercase text-[#5A5A40]">Período Final (Filtro)</label>
-              <input
-                type="date"
-                className="w-full p-3 bg-[#f5f5f0] border-none rounded-xl text-sm focus:ring-2 focus:ring-[#5A5A40]/20 focus:outline-none font-medium text-gray-700"
-                value={statsEndDate}
-                onChange={(e) => setStatsEndDate(e.target.value)}
-              />
+                Últimos 30 Dias
+              </button>
+              <button
+                onClick={() => setFilterPreset('period')}
+                className={cn(
+                  "px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
+                  filterPreset === 'period' ? "bg-white text-[#5A5A40] shadow-sm" : "text-[#5A5A40]/60 hover:text-[#5A5A40]"
+                )}
+              >
+                Por Período
+              </button>
+              <button
+                onClick={() => setFilterPreset('year')}
+                className={cn(
+                  "px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
+                  filterPreset === 'year' ? "bg-white text-[#5A5A40] shadow-sm" : "text-[#5A5A40]/60 hover:text-[#5A5A40]"
+                )}
+              >
+                Por Ano
+              </button>
+              <button
+                onClick={() => setFilterPreset('month')}
+                className={cn(
+                  "px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
+                  filterPreset === 'month' ? "bg-white text-[#5A5A40] shadow-sm" : "text-[#5A5A40]/60 hover:text-[#5A5A40]"
+                )}
+              >
+                Por Mês
+              </button>
             </div>
           </div>
-          {/* Ações de Limpeza */}
-          {(selectedCollab || statsStartDate || statsEndDate) && (
-            <button
-              onClick={() => {
-                setSelectedCollab('');
-                setStatsStartDate('');
-                setStatsEndDate('');
-              }}
-              className="w-full lg:w-auto px-6 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold text-xs rounded-xl transition-all"
-            >
-              Limpar Filtros
-            </button>
-          )}
+
+          <div className="flex flex-col lg:flex-row gap-6 items-end justify-between">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 flex-1 w-full">
+              {/* Filtro por Colaborador */}
+              <div className="space-y-2">
+                <label className="text-xs font-bold uppercase text-[#5A5A40]">Filtrar por Colaborador</label>
+                <select
+                  className="w-full p-3 bg-[#f5f5f0] border-none rounded-xl text-sm focus:ring-2 focus:ring-[#5A5A40]/20 focus:outline-none font-medium text-gray-700"
+                  value={selectedCollab}
+                  onChange={(e) => setSelectedCollab(e.target.value)}
+                >
+                  <option value="">Todos os Colaboradores</option>
+                  {collabsWithProductionInPeriod.map(name => (
+                    <option key={name} value={name}>{name}</option>
+                  ))}
+                  {collabsWithProductionInPeriod.length === 0 && (
+                    <option disabled value="">Nenhum colaborador com produção</option>
+                  )}
+                </select>
+              </div>
+
+              {/* Dynamic controls based on filterPreset */}
+              {filterPreset === 'period' && (
+                <>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold uppercase text-[#5A5A40]">Período Inicial</label>
+                    <input
+                      type="date"
+                      className="w-full p-3 bg-[#f5f5f0] border-none rounded-xl text-sm focus:ring-2 focus:ring-[#5A5A40]/20 focus:outline-none font-medium text-gray-700"
+                      value={statsStartDate}
+                      onChange={(e) => setStatsStartDate(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold uppercase text-[#5A5A40]">Período Final</label>
+                    <input
+                      type="date"
+                      className="w-full p-3 bg-[#f5f5f0] border-none rounded-xl text-sm focus:ring-2 focus:ring-[#5A5A40]/20 focus:outline-none font-medium text-gray-700"
+                      value={statsEndDate}
+                      onChange={(e) => setStatsEndDate(e.target.value)}
+                    />
+                  </div>
+                </>
+              )}
+
+              {filterPreset === '30days' && (
+                <div className="col-span-2 space-y-2">
+                  <label className="text-xs font-bold uppercase text-[#5A5A40]">Período Selecionado (Automático)</label>
+                  <div className="w-full p-3 bg-gray-50 border border-gray-100 rounded-xl text-sm text-[#5A5A40]/80 font-medium">
+                    De <span className="font-bold underline">{format(parseLocalDate(statsStartDate), 'dd/MM/yyyy')}</span> até <span className="font-bold underline">{format(parseLocalDate(statsEndDate), 'dd/MM/yyyy')}</span> (Últimos 30 dias)
+                  </div>
+                </div>
+              )}
+
+              {filterPreset === 'year' && (
+                <>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold uppercase text-[#5A5A40]">Selecionar Ano</label>
+                    <select
+                      className="w-full p-3 bg-[#f5f5f0] border-none rounded-xl text-sm focus:ring-2 focus:ring-[#5A5A40]/20 focus:outline-none font-medium text-gray-700"
+                      value={selectedYear}
+                      onChange={(e) => setSelectedYear(Number(e.target.value))}
+                    >
+                      {[currentYear, currentYear - 1, currentYear - 2, currentYear - 3].map(y => (
+                        <option key={y} value={y}>{y}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold uppercase text-[#5A5A40]">Período do Ano</label>
+                    <div className="w-full h-[48px] flex items-center px-4 bg-gray-50 border border-gray-100 rounded-xl text-xs text-[#5A5A40]/80 font-medium whitespace-nowrap overflow-hidden text-ellipsis">
+                      {format(parseLocalDate(statsStartDate), 'dd/MM/yyyy')} - {format(parseLocalDate(statsEndDate), 'dd/MM/yyyy')}
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {filterPreset === 'month' && (
+                <>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold uppercase text-[#5A5A40]">Selecionar Mês</label>
+                    <select
+                      className="w-full p-3 bg-[#f5f5f0] border-none rounded-xl text-sm focus:ring-2 focus:ring-[#5A5A40]/20 focus:outline-none font-medium text-gray-700"
+                      value={selectedMonth}
+                      onChange={(e) => setSelectedMonth(Number(e.target.value))}
+                    >
+                      {['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'].map((m, idx) => (
+                        <option key={idx} value={idx}>{m}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold uppercase text-[#5A5A40]">Selecionar Ano</label>
+                    <select
+                      className="w-full p-3 bg-[#f5f5f0] border-none rounded-xl text-sm focus:ring-2 focus:ring-[#5A5A40]/20 focus:outline-none font-medium text-gray-700"
+                      value={selectedYear}
+                      onChange={(e) => setSelectedYear(Number(e.target.value))}
+                    >
+                      {[currentYear, currentYear - 1, currentYear - 2, currentYear - 3].map(y => (
+                        <option key={y} value={y}>{y}</option>
+                      ))}
+                    </select>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Clear button if customized */}
+            {(selectedCollab || filterPreset !== '30days' || selectedYear !== currentYear || selectedMonth !== new Date().getMonth()) && (
+              <button
+                onClick={() => {
+                  setSelectedCollab('');
+                  setFilterPreset('30days');
+                  setSelectedYear(currentYear);
+                  setSelectedMonth(new Date().getMonth());
+                }}
+                className="w-full lg:w-auto px-6 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold text-xs rounded-xl transition-all h-[44px] shrink-0"
+              >
+                Limpar Filtros
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
