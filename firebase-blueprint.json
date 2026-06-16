@@ -48,6 +48,52 @@
         "color": { "type": "string" }
       },
       "required": ["name"]
+    },
+    "Config_Nao_Conformidades": {
+      "title": "Config_Nao_Conformidades",
+      "description": "Non-conformity reasons configuration.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" }
+      },
+      "required": ["name"]
+    },
+    "Lote_Nao_Conformidades": {
+      "title": "Lote_Nao_Conformidades",
+      "description": "Recorded non-conformities for batches.",
+      "type": "object",
+      "properties": {
+        "recebimento_lote_id": { "type": "string" },
+        "nao_conformidade_id": { "type": "string" },
+        "pac_id": { "type": "string" },
+        "placas": { "type": "array" }
+      },
+      "required": ["recebimento_lote_id", "nao_conformidade_id", "pac_id", "placas"]
+    },
+    "NotificationType": {
+      "title": "NotificationType",
+      "description": "Available notification types.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" }
+      },
+      "required": ["name"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "Official generated notifications.",
+      "type": "object",
+      "properties": {
+        "pac_id": { "type": "string" },
+        "pac_name": { "type": "string" },
+        "notification_type_id": { "type": "string" },
+        "notification_type_name": { "type": "string" },
+        "notes": { "type": "string" },
+        "batches": { "type": "array" },
+        "createdAt": { "type": "string" },
+        "status": { "type": "string" }
+      },
+      "required": ["pac_id", "pac_name", "notification_type_id", "notification_type_name", "batches", "createdAt", "status"]
     }
   },
   "firestore": {
@@ -66,6 +112,22 @@
     "/statuses/{statusId}": {
       "schema": "Status",
       "description": "Collection of status options."
+    },
+    "/non_conformities_configs/{configId}": {
+      "schema": "Config_Nao_Conformidades",
+      "description": "Collection of non-conformity config reasons."
+    },
+    "/lote_nao_conformidades/{nonConformityId}": {
+      "schema": "Lote_Nao_Conformidades",
+      "description": "Collection of logged batch non-conformities with plates."
+    },
+    "/notification_types/{typeId}": {
+      "schema": "NotificationType",
+      "description": "Collection of options for notifications."
+    },
+    "/notifications/{notificationId}": {
+      "schema": "Notification",
+      "description": "Collection of logged notifications."
     }
   }
 }

@@ -9,6 +9,7 @@ import {
   onSnapshot, 
   addDoc, 
   updateDoc, 
+  setDoc,
   doc, 
   query, 
   orderBy, 
@@ -16,7 +17,8 @@ import {
   getDocFromServer,
   deleteDoc,
   getDocs,
-  writeBatch
+  writeBatch,
+  where
 } from 'firebase/firestore';
 import { 
   signInWithPopup, 
@@ -70,6 +72,8 @@ import {
   AreaChart,
   Area
 } from 'recharts';
+import NotificationsPanel from './components/NotificationsPanel';
+import NotificationTemplatesManager from './components/NotificationTemplatesManager';
 
 // Utility for tailwind classes
 function cn(...inputs: ClassValue[]) {
@@ -286,10 +290,34 @@ export default function App() {
   const [pacs, setPacs] = useState<ConfigItem[]>([]);
   const [collaborators, setCollaborators] = useState<ConfigItem[]>([]);
   const [statuses, setStatuses] = useState<ConfigItem[]>([]);
+  const [nonConformitiesConfigs, setNonConformitiesConfigs] = useState<ConfigItem[]>([]);
+  const [nonConformityRecords, setNonConformityRecords] = useState<any[]>([]);
+  const [notificationTypes, setNotificationTypes] = useState<ConfigItem[]>([]);
+  const [generatedNotifications, setGeneratedNotifications] = useState<any[]>([]);
   
+  const [logoUrl, setLogoUrl] = useState<string>(() => {
+    return localStorage.getItem('lotes_logoUrl') || '';
+  });
+
+  const saveLogoUrl = async (newUrl: string) => {
+    setLogoUrl(newUrl);
+    if (newUrl) {
+      localStorage.setItem('lotes_logoUrl', newUrl);
+    } else {
+      localStorage.removeItem('lotes_logoUrl');
+    }
+    if (!isLocalMode) {
+      try {
+        await setDoc(doc(db, 'configs', 'branding'), { logoUrl: newUrl });
+      } catch (err) {
+        console.error("Erro ao salvar logo no Firestore:", err);
+      }
+    }
+  };
+
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('open'); // Changed default to 'open'
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'config' | 'stats'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'config' | 'stats' | 'notifications'>('dashboard');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingBatch, setEditingBatch] = useState<Batch | null>(null);
   const [batchToDelete, setBatchToDelete] = useState<string | null>(null);
@@ -478,9 +506,63 @@ export default function App() {
         localStorage.setItem('lotes_batches', JSON.stringify(initialBatches));
       }
 
+      const savedNonConforConfigs = localStorage.getItem('lotes_non_conformities_configs');
+      const savedNonConforRecords = localStorage.getItem('lotes_lote_nao_conformidades');
+
+      let initialNonConforConfigs: ConfigItem[] = [];
+      let initialNonConforRecords: any[] = [];
+
+      if (savedNonConforConfigs) {
+        initialNonConforConfigs = JSON.parse(savedNonConforConfigs);
+      } else {
+        initialNonConforConfigs = [
+          { id: 'nc1', name: 'Placa não cadastrada' },
+          { id: 'nc2', name: 'Documento ilegível' },
+          { id: 'nc3', name: 'Divergência de veículo' },
+          { id: 'nc4', name: 'Ensaio danificado' },
+          { id: 'nc5', name: 'Lacre rompido' }
+        ];
+        localStorage.setItem('lotes_non_conformities_configs', JSON.stringify(initialNonConforConfigs));
+      }
+
+      if (savedNonConforRecords) {
+        initialNonConforRecords = JSON.parse(savedNonConforRecords);
+      } else {
+        initialNonConforRecords = [];
+        localStorage.setItem('lotes_lote_nao_conformidades', JSON.stringify(initialNonConforRecords));
+      }
+
+      // Load local notification types
+      const savedNotificationTypes = localStorage.getItem('lotes_notification_types');
+      let initialNotificationTypes: ConfigItem[] = [];
+      if (savedNotificationTypes) {
+        initialNotificationTypes = JSON.parse(savedNotificationTypes);
+      } else {
+        initialNotificationTypes = [
+          { id: 'nt1', name: 'Notificação de Irregularidade' },
+          { id: 'nt2', name: 'Termo de Ocorrência' },
+          { id: 'nt3', name: 'Auto de Infração' }
+        ];
+        localStorage.setItem('lotes_notification_types', JSON.stringify(initialNotificationTypes));
+      }
+
+      // Load local generated notifications
+      const savedGeneratedNotifications = localStorage.getItem('lotes_notifications');
+      let initialGeneratedNotifications: any[] = [];
+      if (savedGeneratedNotifications) {
+        initialGeneratedNotifications = JSON.parse(savedGeneratedNotifications);
+      } else {
+        initialGeneratedNotifications = [];
+        localStorage.setItem('lotes_notifications', JSON.stringify(initialGeneratedNotifications));
+      }
+
       setPacs(initialPacs.sort((a, b) => a.name.localeCompare(b.name)));
       setCollaborators(initialCollabs.sort((a, b) => a.name.localeCompare(b.name)));
       setStatuses(initialStatuses.sort((a, b) => a.name.localeCompare(b.name)));
+      setNonConformitiesConfigs(initialNonConforConfigs.sort((a, b) => a.name.localeCompare(b.name)));
+      setNonConformityRecords(initialNonConforRecords);
+      setNotificationTypes(initialNotificationTypes.sort((a, b) => a.name.localeCompare(b.name)));
+      setGeneratedNotifications(initialGeneratedNotifications);
       setBatches(initialBatches);
       return;
     }
@@ -520,11 +602,58 @@ export default function App() {
       (err) => handleFirestoreError(err, OperationType.LIST, 'statuses')
     );
 
+    const unsubNonConforConfigs = onSnapshot(
+      query(collection(db, 'non_conformities_configs'), orderBy('name')),
+      (snapshot) => setNonConformitiesConfigs(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ConfigItem))),
+      (err) => handleFirestoreError(err, OperationType.LIST, 'non_conformities_configs')
+    );
+
+    const unsubNonConforRecords = onSnapshot(
+      collection(db, 'lote_nao_conformidades'),
+      (snapshot) => setNonConformityRecords(snapshot.docs.map(d => ({ id: d.id, ...d.data() }))),
+      (err) => handleFirestoreError(err, OperationType.LIST, 'lote_nao_conformidades')
+    );
+
+    const unsubNotificationTypes = onSnapshot(
+      query(collection(db, 'notification_types'), orderBy('name')),
+      (snapshot) => setNotificationTypes(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ConfigItem))),
+      (err) => handleFirestoreError(err, OperationType.LIST, 'notification_types')
+    );
+
+    const unsubNotifications = onSnapshot(
+      collection(db, 'notifications'),
+      (snapshot) => setGeneratedNotifications(snapshot.docs.map(d => ({ id: d.id, ...d.data() }))),
+      (err) => handleFirestoreError(err, OperationType.LIST, 'notifications')
+    );
+
+    const unsubLogo = onSnapshot(
+      doc(db, 'configs', 'branding'),
+      (snapshot) => {
+        if (snapshot.exists()) {
+          const data = snapshot.data();
+          if (data && data.logoUrl !== undefined) {
+            setLogoUrl(data.logoUrl);
+            if (data.logoUrl) {
+              localStorage.setItem('lotes_logoUrl', data.logoUrl);
+            } else {
+              localStorage.removeItem('lotes_logoUrl');
+            }
+          }
+        }
+      },
+      (err) => console.log('Firestore unsubLogo warn:', err)
+    );
+
     return () => {
       unsubBatches();
       unsubPacs();
       unsubCollabs();
       unsubStatuses();
+      unsubNonConforConfigs();
+      unsubNonConforRecords();
+      unsubNotificationTypes();
+      unsubNotifications();
+      unsubLogo();
     };
   }, [user, isLocalMode]);
 
@@ -588,13 +717,19 @@ export default function App() {
       if (statusFilter === 'EM DIA' && (isOverdue || isWarning || isFinished)) return false;
 
       // Dashboard Period Filter
-      if (dashStartDate) {
-        const start = startOfDay(parseLocalDate(dashStartDate));
-        if (b.periodoInicial.toDate() < start) return false;
-      }
-      if (dashEndDate) {
-        const end = startOfDay(parseLocalDate(dashEndDate));
-        if (startOfDay(b.periodoInicial.toDate()) > end) return false;
+      const dateObj = isFinished 
+        ? b.periodoInicial.toDate() 
+        : (b.recebidoEm ? b.recebidoEm.toDate() : b.periodoInicial?.toDate());
+
+      if (dateObj) {
+        if (dashStartDate) {
+          const start = startOfDay(parseLocalDate(dashStartDate));
+          if (dateObj < start) return false;
+        }
+        if (dashEndDate) {
+          const end = startOfDay(parseLocalDate(dashEndDate));
+          if (startOfDay(dateObj) > end) return false;
+        }
       }
 
       return matchesSearch;
@@ -610,22 +745,21 @@ export default function App() {
     let totalEnsaiosReceived = 0;
 
     batches.forEach(b => {
-      // Check if batch is within dashboard period filter
-      let match = true;
-      if (dashStartDate) {
-        const start = startOfDay(parseLocalDate(dashStartDate));
-        if (b.periodoInicial.toDate() < start) match = false;
-      }
-      if (dashEndDate) {
-        const end = startOfDay(parseLocalDate(dashEndDate));
-        if (startOfDay(b.periodoInicial.toDate()) > end) match = false;
-      }
+      const hasInformado = b.conferidoPor && b.conferidoPor.trim() !== '';
 
-      if (match) {
-        const hasInformado = b.conferidoPor && b.conferidoPor.trim() !== '';
-        if (!hasInformado) {
-          totalEnsaiosOpen += b.numEnsaios;
-        } else {
+      if (hasInformado) {
+        // Check if finished batch is within dashboard period filter (using periodoInicial)
+        let match = true;
+        if (dashStartDate) {
+          const start = startOfDay(parseLocalDate(dashStartDate));
+          if (b.periodoInicial.toDate() < start) match = false;
+        }
+        if (dashEndDate) {
+          const end = startOfDay(parseLocalDate(dashEndDate));
+          if (startOfDay(b.periodoInicial.toDate()) > end) match = false;
+        }
+
+        if (match) {
           totalEnsaiosFinished += b.numEnsaios;
           
           // On time vs Late
@@ -636,9 +770,29 @@ export default function App() {
             onTimeCount++;
           }
         }
+      } else {
+        // Check if open batch is within dashboard period filter (using recebidoEm)
+        let matchOpen = true;
+        const openDate = b.recebidoEm ? b.recebidoEm.toDate() : b.periodoInicial?.toDate();
+        if (openDate) {
+          if (dashStartDate) {
+            const start = startOfDay(parseLocalDate(dashStartDate));
+            if (openDate < start) matchOpen = false;
+          }
+          if (dashEndDate) {
+            const end = startOfDay(parseLocalDate(dashEndDate));
+            if (startOfDay(openDate) > end) matchOpen = false;
+          }
+        } else {
+          matchOpen = false;
+        }
+
+        if (matchOpen) {
+          totalEnsaiosOpen += b.numEnsaios;
+        }
       }
 
-      // Check if batch is within dashboard period filter using recebidoEm
+      // Check if batch is within dashboard period filter using recebidoEm and has recebidoPor filled
       let matchReceived = true;
       if (dashStartDate) {
         const start = startOfDay(parseLocalDate(dashStartDate));
@@ -649,7 +803,7 @@ export default function App() {
         if (startOfDay(b.recebidoEm.toDate()) > end) matchReceived = false;
       }
 
-      if (matchReceived) {
+      if (matchReceived && b.recebidoPor && b.recebidoPor.trim() !== '') {
         totalEnsaiosReceived += b.numEnsaios;
       }
     });
@@ -696,6 +850,14 @@ export default function App() {
         const updated = statuses.map(s => s.id === id ? { ...s, name } : s).sort((a, b) => a.name.localeCompare(b.name));
         setStatuses(updated);
         localStorage.setItem('lotes_statuses', JSON.stringify(updated));
+      } else if (type === 'non_conformities_configs') {
+        const updated = nonConformitiesConfigs.map(s => s.id === id ? { ...s, name } : s).sort((a, b) => a.name.localeCompare(b.name));
+        setNonConformitiesConfigs(updated);
+        localStorage.setItem('lotes_non_conformities_configs', JSON.stringify(updated));
+      } else if (type === 'notification_types') {
+        const updated = notificationTypes.map(s => s.id === id ? { ...s, name } : s).sort((a, b) => a.name.localeCompare(b.name));
+        setNotificationTypes(updated);
+        localStorage.setItem('lotes_notification_types', JSON.stringify(updated));
       }
       return;
     }
@@ -804,6 +966,15 @@ export default function App() {
                 Estatísticas
               </button>
               <button 
+                onClick={() => setActiveTab('notifications')}
+                className={cn(
+                  "px-4 py-2 rounded-full text-sm font-medium transition-all",
+                  activeTab === 'notifications' ? "bg-[#5A5A40] text-white" : "text-[#5A5A40] hover:bg-[#f0f0e5]"
+                )}
+              >
+                Notificações
+              </button>
+              <button 
                 onClick={() => setActiveTab('config')}
                 className={cn(
                   "px-4 py-2 rounded-full text-sm font-medium transition-all",
@@ -903,7 +1074,7 @@ export default function App() {
                   <Download size={24} />
                 </div>
                 <div>
-                  <p className="text-xs font-bold uppercase text-[#5A5A40] opacity-60">Total Recebidos</p>
+                  <p className="text-xs font-bold uppercase text-[#5A5A40] opacity-60">Total Recebido</p>
                   <p className="text-2xl font-bold">{stats.totalEnsaiosReceived}</p>
                 </div>
               </div>
@@ -1002,11 +1173,27 @@ export default function App() {
           </>
         ) : activeTab === 'stats' ? (
           <StatsPanel batches={batches} collaborators={collaborators} pacs={pacs} />
+        ) : activeTab === 'notifications' ? (
+          <NotificationsPanel 
+            batches={batches}
+            pacs={pacs}
+            nonConformityRecords={nonConformityRecords}
+            nonConformitiesConfigs={nonConformitiesConfigs}
+            notificationTypes={notificationTypes}
+            generatedNotifications={generatedNotifications}
+            setGeneratedNotifications={setGeneratedNotifications}
+            isLocalMode={isLocalMode}
+            handleFirestoreError={handleFirestoreError}
+            logoUrl={logoUrl}
+          />
         ) : (
           <ConfigPanel 
             pacs={pacs} 
             collaborators={collaborators} 
             statuses={statuses}
+            nonConformitiesConfigs={nonConformitiesConfigs}
+            nonConformityRecords={nonConformityRecords}
+            notificationTypes={notificationTypes}
             handleFirestoreError={handleFirestoreError}
             onUpdate={handleUpdateConfig}
             setConfigToDelete={setConfigToDelete}
@@ -1016,6 +1203,10 @@ export default function App() {
             setPacs={setPacs}
             setCollaborators={setCollaborators}
             setStatuses={setStatuses}
+            setNonConformitiesConfigs={setNonConformitiesConfigs}
+            setNotificationTypes={setNotificationTypes}
+            logoUrl={logoUrl}
+            saveLogoUrl={saveLogoUrl}
           />
         )}
       </main>
@@ -1029,18 +1220,39 @@ export default function App() {
             pacs={pacs}
             collaborators={collaborators}
             statuses={statuses}
+            nonConformitiesConfigs={nonConformitiesConfigs}
             handleFirestoreError={handleFirestoreError}
             isLocalMode={isLocalMode}
-            onSaveLocalBatch={(localBatch: any) => {
+            onSaveLocalBatch={(localBatch: any, batchNCs: any[]) => {
               let updated;
+              let batchId = '';
               if (editingBatch) {
-                updated = batches.map(b => b.id === editingBatch.id ? { ...b, ...localBatch } : b);
+                batchId = editingBatch.id;
+                updated = batches.map(b => b.id === editingBatch.id ? { ...b, ...localBatch, nonConformities: batchNCs } : b);
               } else {
-                updated = [{ ...localBatch, id: 'local-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9) }, ...batches];
+                batchId = 'local-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9);
+                updated = [{ ...localBatch, id: batchId, nonConformities: batchNCs }, ...batches];
               }
               updated.sort((a, b) => b.recebidoEm.toDate().getTime() - a.recebidoEm.toDate().getTime());
               setBatches(updated);
               localStorage.setItem('lotes_batches', JSON.stringify(updated));
+
+              // Save lote_nao_conformidades in local storage
+              const savedNCRecords = localStorage.getItem('lotes_lote_nao_conformidades');
+              let ncRecords = savedNCRecords ? JSON.parse(savedNCRecords) : [];
+              // Filter out old ones for this batch ID
+              ncRecords = ncRecords.filter((nc: any) => nc.recebimento_lote_id !== batchId);
+              // Map and add new ones
+              const newNCObjects = batchNCs.map(item => ({
+                id: item.id.startsWith('nc-') ? item.id : 'ncLocal-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9),
+                recebimento_lote_id: batchId,
+                nao_conformidade_id: item.nao_conformidade_id,
+                pac_id: localBatch.pac,
+                placas: item.placas
+              }));
+              const updatedNCs = [...ncRecords, ...newNCObjects];
+              localStorage.setItem('lotes_lote_nao_conformidades', JSON.stringify(updatedNCs));
+              setNonConformityRecords(updatedNCs);
             }}
           />
         )}
@@ -1073,6 +1285,14 @@ export default function App() {
                   const updated = statuses.filter(s => s.id !== id);
                   setStatuses(updated);
                   localStorage.setItem('lotes_statuses', JSON.stringify(updated));
+                } else if (type === 'non_conformities_configs') {
+                  const updated = nonConformitiesConfigs.filter(s => s.id !== id);
+                  setNonConformitiesConfigs(updated);
+                  localStorage.setItem('lotes_non_conformities_configs', JSON.stringify(updated));
+                } else if (type === 'notification_types') {
+                  const updated = notificationTypes.filter(s => s.id !== id);
+                  setNotificationTypes(updated);
+                  localStorage.setItem('lotes_notification_types', JSON.stringify(updated));
                 }
                 setConfigToDelete(null);
                 return;
@@ -1310,7 +1530,7 @@ function SearchableSelect({ label, value, options, onChange, placeholder, requir
   );
 }
 
-function BatchModal({ isOpen, onClose, batch, pacs, collaborators, statuses, handleFirestoreError, isLocalMode, onSaveLocalBatch }: any) {
+function BatchModal({ isOpen, onClose, batch, pacs, collaborators, statuses, nonConformitiesConfigs, handleFirestoreError, isLocalMode, onSaveLocalBatch }: any) {
   const [localError, setLocalError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     pac: batch?.pac || '',
@@ -1322,6 +1542,74 @@ function BatchModal({ isOpen, onClose, batch, pacs, collaborators, statuses, han
     lidoPor: batch?.lidoPor || '',
     conferidoPor: batch?.conferidoPor || '',
   });
+
+  // Non-conformity specific states within BatchModal
+  const [activeSubView, setActiveSubView] = useState<'main' | 'addNonConformity'>('main');
+  const [localNonConformities, setLocalNonConformities] = useState<any[]>([]);
+  const [nonConformityItems, setNonConformityItems] = useState<{ plate: string; reasonId: string }[]>([
+    { plate: '', reasonId: '' }
+  ]);
+  const [subError, setSubError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    if (isLocalMode) {
+      setLocalNonConformities(batch?.nonConformities || []);
+    } else if (batch) {
+      const fetchNCs = async () => {
+        try {
+          const q = query(
+            collection(db, 'lote_nao_conformidades'), 
+            where('recebimento_lote_id', '==', batch.id)
+          );
+          const snapshot = await getDocs(q);
+          const list = snapshot.docs.map(docRef => {
+            const data = docRef.data();
+            const reason = nonConformitiesConfigs?.find((c: any) => c.id === data.nao_conformidade_id);
+            return {
+              id: docRef.id,
+              nao_conformidade_id: data.nao_conformidade_id,
+              nao_conformidade_name: reason ? reason.name : (data.nao_conformidade_name || 'Outro'),
+              placas: data.placas || []
+            };
+          });
+          setLocalNonConformities(list);
+        } catch (err) {
+          console.error("Error loading non-conformities", err);
+        }
+      };
+      fetchNCs();
+    } else {
+      setLocalNonConformities([]);
+    }
+  }, [batch, isOpen, isLocalMode, nonConformitiesConfigs]);
+
+  const handleIncludeClick = () => {
+    if (!formData.pac) {
+      setLocalError("Por favor, selecione um PAC antes de registrar uma não-conformidade.");
+      return;
+    }
+    setNonConformityItems([{ plate: '', reasonId: '' }]);
+    setSubError(null);
+    setActiveSubView('addNonConformity');
+  };
+
+  const handleAddNonConformityItem = () => {
+    setNonConformityItems([...nonConformityItems, { plate: '', reasonId: '' }]);
+  };
+
+  const handleNonConformityItemChange = (index: number, field: 'plate' | 'reasonId', val: string) => {
+    const updated = [...nonConformityItems];
+    updated[index] = {
+      ...updated[index],
+      [field]: field === 'plate' ? val.toUpperCase() : val
+    };
+    setNonConformityItems(updated);
+  };
+
+  const handleRemoveNonConformityItem = (index: number) => {
+    setNonConformityItems(nonConformityItems.filter((_, idx) => idx !== index));
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1358,21 +1646,189 @@ function BatchModal({ isOpen, onClose, batch, pacs, collaborators, statuses, han
       };
 
       if (isLocalMode) {
-        onSaveLocalBatch(data);
+        onSaveLocalBatch(data, localNonConformities);
         onClose();
         return;
       }
 
+      let batchId = '';
       if (batch) {
-        await updateDoc(doc(db, 'batches', batch.id), data);
+        batchId = batch.id;
+        await updateDoc(doc(db, 'batches', batch.id), {
+          ...data,
+          nonConformities: localNonConformities
+        });
       } else {
-        await addDoc(collection(db, 'batches'), data);
+        const docRef = await addDoc(collection(db, 'batches'), {
+          ...data,
+          nonConformities: localNonConformities
+        });
+        batchId = docRef.id;
       }
+
+      // Sync nonconformities in Firestore
+      const q = query(
+        collection(db, 'lote_nao_conformidades'), 
+        where('recebimento_lote_id', '==', batchId)
+      );
+      const snapshot = await getDocs(q);
+      const deletePromises = snapshot.docs.map(docRef => deleteDoc(docRef.ref));
+      await Promise.all(deletePromises);
+
+      const addPromises = localNonConformities.map(item => {
+        return addDoc(collection(db, 'lote_nao_conformidades'), {
+          recebimento_lote_id: batchId,
+          nao_conformidade_id: item.nao_conformidade_id,
+          pac_id: data.pac,
+          placas: item.placas
+        });
+      });
+      await Promise.all(addPromises);
+
       onClose();
     } catch (err) {
       handleFirestoreError(err, batch ? OperationType.UPDATE : OperationType.CREATE, 'batches');
     }
   };
+
+  if (activeSubView === 'addNonConformity') {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-in fade-in duration-200">
+        <div className="bg-white w-full max-w-2xl rounded-[32px] shadow-2xl overflow-hidden animate-in zoom-in duration-200">
+          <div className="p-8 border-b border-[#e5e5e0] flex items-center justify-between col-span-full">
+            <h2 className="text-2xl font-display font-bold tracking-tight text-[#5A5A40]">Cadastrar Não-Conformidade</h2>
+            <button 
+              type="button"
+              onClick={() => setActiveSubView('main')} 
+              className="p-2 hover:bg-[#f5f5f0] rounded-full"
+            >
+              <X size={24} />
+            </button>
+          </div>
+          
+          <div className="p-8 space-y-6 max-h-[70vh] overflow-y-auto">
+            {subError && (
+              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <AlertCircle size={18} />
+                  <p className="text-sm">{subError}</p>
+                </div>
+                <button type="button" onClick={() => setSubError(null)}><X size={18} /></button>
+              </div>
+            )}
+
+            <div className="space-y-4">
+              <label className="text-xs font-bold uppercase text-[#5A5A40]">Placas e Seus Motivos Relacionados</label>
+              
+              <div className="space-y-4">
+                {nonConformityItems.map((item, index) => (
+                  <div key={index} className="flex flex-col sm:flex-row gap-3 p-4 bg-[#f5f5f0]/50 rounded-2xl border border-[#e5e5e0] relative">
+                    <div className="flex-1 space-y-1">
+                      <label className="text-[10px] font-bold uppercase text-[#5A5A40]/70">Placa Afetada</label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="Ex: ABC1234"
+                        className="w-full p-3 bg-white border border-[#e5e5e0] rounded-xl focus:ring-2 focus:ring-[#5A5A40]/20 font-mono text-sm uppercase"
+                        value={item.plate}
+                        onChange={e => handleNonConformityItemChange(index, 'plate', e.target.value)}
+                        style={{ textTransform: 'uppercase' }}
+                      />
+                    </div>
+                    
+                    <div className="flex-[2] space-y-1">
+                      <label className="text-[10px] font-bold uppercase text-[#5A5A40]/70">Motivo de Não-Conformidade</label>
+                      <select
+                        required
+                        className="w-full p-3 bg-white border border-[#e5e5e0] rounded-xl focus:ring-2 focus:ring-[#5A5A40]/20 text-sm"
+                        value={item.reasonId}
+                        onChange={e => handleNonConformityItemChange(index, 'reasonId', e.target.value)}
+                      >
+                        <option value="">Selecionar não-conformidade</option>
+                        {nonConformitiesConfigs.map((nc: any) => (
+                          <option key={nc.id} value={nc.id}>
+                            {nc.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {nonConformityItems.length > 1 && (
+                      <div className="flex items-end justify-end">
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveNonConformityItem(index)}
+                          className="p-3 text-red-500 hover:bg-red-50 rounded-xl transition-colors self-end"
+                          title="Remover placa e motivo"
+                        >
+                          <Trash2 size={18} />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+              
+              <button
+                type="button"
+                onClick={handleAddNonConformityItem}
+                className="text-[#5A5A40] text-sm font-bold flex items-center gap-1 hover:underline mt-2"
+              >
+                <Plus size={16} />
+                Adicionar Outra Placa / Motivo
+              </button>
+            </div>
+
+            <div className="pt-6 flex gap-3 border-t border-[#e5e5e0]">
+              <button
+                type="button"
+                onClick={() => setActiveSubView('main')}
+                className="flex-1 px-6 py-3 rounded-2xl font-medium border border-[#e5e5e0] hover:bg-[#f5f5f0] transition-all"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const incompleteRow = nonConformityItems.find(item => {
+                    const p = item.plate.trim();
+                    const r = item.reasonId;
+                    return (p !== '' && r === '') || (p === '' && r !== '');
+                  });
+                  if (incompleteRow) {
+                    setSubError("Por favor, preencha a placa e escolha o motivo para todos os itens cadastrados.");
+                    return;
+                  }
+
+                  const validItems = nonConformityItems.filter(item => item.plate.trim() !== '' && item.reasonId !== '');
+                  if (validItems.length === 0) {
+                    setSubError("Por favor, informe pelo menos uma placa com seu motivo.");
+                    return;
+                  }
+
+                  const newNCObjects = validItems.map(item => {
+                    const reason = nonConformitiesConfigs.find((c: any) => c.id === item.reasonId);
+                    return {
+                      id: 'nc-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9),
+                      nao_conformidade_id: item.reasonId,
+                      nao_conformidade_name: reason ? reason.name : 'Outro',
+                      placas: [item.plate.trim().toUpperCase()]
+                    };
+                  });
+
+                  setLocalNonConformities([...localNonConformities, ...newNCObjects]);
+                  setActiveSubView('main');
+                }}
+                className="flex-1 px-6 py-3 bg-[#5A5A40] text-white rounded-2xl font-medium hover:bg-[#4a4a30] transition-all"
+              >
+                Salvar Não-Conformidade
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
@@ -1486,7 +1942,51 @@ function BatchModal({ isOpen, onClose, batch, pacs, collaborators, statuses, han
             </div>
           </div>
 
-          <div className="pt-6 flex gap-3">
+          <div className="pt-6 border-t border-[#e5e5e0] space-y-4">
+            <div className="flex items-center justify-between">
+              <h4 className="text-sm font-bold uppercase text-[#5A5A40] opacity-50">Lote com Não-Conformidade</h4>
+              <button
+                type="button"
+                onClick={handleIncludeClick}
+                className={cn(
+                  "px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1 border transition-all",
+                  formData.pac
+                    ? "bg-[#f5f5f0] text-[#5A5A40] border-[#5A5A40]/10 hover:bg-[#e5e5e0]"
+                    : "opacity-50 cursor-not-allowed bg-gray-50 text-gray-400 border-gray-200"
+                )}
+              >
+                <Plus size={14} />
+                INCLUIR
+              </button>
+            </div>
+
+            {localNonConformities.length > 0 ? (
+              <div className="border border-[#e5e5e0] rounded-2xl overflow-hidden divide-y divide-[#e5e5e0]">
+                {localNonConformities.map((item, index) => (
+                  <div key={item.id || index} className="p-4 flex justify-between items-center bg-[#f5f5f0]/30 hover:bg-[#f5f5f0]/50 transition-colors animate-in fade-in duration-200">
+                    <div>
+                      <p className="font-bold text-sm text-[#5A5A40]">{item.nao_conformidade_name}</p>
+                      <p className="text-xs text-gray-500 font-mono mt-1">
+                        Placas: {item.placas.join(', ')}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setLocalNonConformities(localNonConformities.filter(nc => nc.id !== item.id))}
+                      className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                      title="Excluir"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-gray-400 italic">Nenhuma não-conformidade registrada para este lote.</p>
+            )}
+          </div>
+
+          <div className="pt-6 flex gap-3 border-t border-[#e5e5e0]">
             <button 
               type="button" onClick={onClose}
               className="flex-1 px-6 py-3 rounded-2xl font-medium border border-[#e5e5e0] hover:bg-[#f5f5f0] transition-all"
@@ -1510,6 +2010,9 @@ function ConfigPanel({
   pacs, 
   collaborators, 
   statuses, 
+  nonConformitiesConfigs,
+  nonConformityRecords,
+  notificationTypes,
   handleFirestoreError, 
   onUpdate, 
   setConfigToDelete, 
@@ -1518,9 +2021,13 @@ function ConfigPanel({
   setBatches, 
   setPacs, 
   setCollaborators, 
-  setStatuses 
+  setStatuses,
+  setNonConformitiesConfigs,
+  setNotificationTypes,
+  logoUrl,
+  saveLogoUrl
 }: any) {
-  const [activeConfig, setActiveConfig] = useState<'pacs' | 'collabs' | 'status' | 'import'>('pacs');
+  const [activeConfig, setActiveConfig] = useState<'pacs' | 'collabs' | 'status' | 'non_conformities' | 'notification_types' | 'import' | 'branding'>('pacs');
   const [newItemName, setNewItemName] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState('');
@@ -2184,7 +2691,11 @@ function ConfigPanel({
 
   const handleAdd = async () => {
     if (!newItemName) return;
-    const collectionName = activeConfig === 'pacs' ? 'pacs' : activeConfig === 'collabs' ? 'collaborators' : 'statuses';
+    const collectionName = 
+      activeConfig === 'pacs' ? 'pacs' : 
+      activeConfig === 'collabs' ? 'collaborators' : 
+      activeConfig === 'status' ? 'statuses' : 
+      activeConfig === 'notification_types' ? 'notification_types' : 'non_conformities_configs';
     if (isLocalMode) {
       const newItem = {
         id: 'local-cfg-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9),
@@ -2198,10 +2709,18 @@ function ConfigPanel({
         const sorted = [...collaborators, newItem].sort((a, b) => a.name.localeCompare(b.name));
         setCollaborators(sorted);
         localStorage.setItem('lotes_collaborators', JSON.stringify(sorted));
-      } else {
+      } else if (collectionName === 'statuses') {
         const sorted = [...statuses, newItem].sort((a, b) => a.name.localeCompare(b.name));
         setStatuses(sorted);
         localStorage.setItem('lotes_statuses', JSON.stringify(sorted));
+      } else if (collectionName === 'notification_types') {
+        const sorted = [...notificationTypes, newItem].sort((a, b) => a.name.localeCompare(b.name));
+        setNotificationTypes(sorted);
+        localStorage.setItem('lotes_notification_types', JSON.stringify(sorted));
+      } else {
+        const sorted = [...nonConformitiesConfigs, newItem].sort((a, b) => a.name.localeCompare(b.name));
+        setNonConformitiesConfigs(sorted);
+        localStorage.setItem('lotes_non_conformities_configs', JSON.stringify(sorted));
       }
       setNewItemName('');
       return;
@@ -2215,7 +2734,11 @@ function ConfigPanel({
   };
 
   const handleDelete = (id: string) => {
-    const collectionName = activeConfig === 'pacs' ? 'pacs' : activeConfig === 'collabs' ? 'collaborators' : 'statuses';
+    const collectionName = 
+      activeConfig === 'pacs' ? 'pacs' : 
+      activeConfig === 'collabs' ? 'collaborators' : 
+      activeConfig === 'status' ? 'statuses' : 
+      activeConfig === 'notification_types' ? 'notification_types' : 'non_conformities_configs';
     setConfigToDelete({ type: collectionName, id });
   };
 
@@ -2226,7 +2749,11 @@ function ConfigPanel({
 
   const handleSaveEdit = async () => {
     if (!editingId || !editingValue.trim()) return;
-    const collectionName = activeConfig === 'pacs' ? 'pacs' : activeConfig === 'collabs' ? 'collaborators' : 'statuses';
+    const collectionName = 
+      activeConfig === 'pacs' ? 'pacs' : 
+      activeConfig === 'collabs' ? 'collaborators' : 
+      activeConfig === 'status' ? 'statuses' : 
+      activeConfig === 'notification_types' ? 'notification_types' : 'non_conformities_configs';
     try {
       await onUpdate(collectionName, editingId, editingValue.trim());
       setEditingId(null);
@@ -2236,7 +2763,11 @@ function ConfigPanel({
     }
   };
 
-  const items = activeConfig === 'pacs' ? pacs : activeConfig === 'collabs' ? collaborators : statuses;
+  const items = 
+    activeConfig === 'pacs' ? pacs : 
+    activeConfig === 'collabs' ? collaborators : 
+    activeConfig === 'status' ? statuses : 
+    activeConfig === 'notification_types' ? notificationTypes : nonConformitiesConfigs;
 
   return (
     <div className="bg-white rounded-[32px] p-8 border border-[#e5e5e0]">
@@ -2260,11 +2791,30 @@ function ConfigPanel({
           Status
         </button>
         <button 
+          onClick={() => setActiveConfig('non_conformities')}
+          className={cn("px-4 py-2 rounded-full text-sm font-bold", activeConfig === 'non_conformities' ? "bg-[#5A5A40] text-white" : "bg-[#f5f5f0] text-[#5A5A40]")}
+        >
+          Motivos de Não-Conformidade
+        </button>
+        <button 
+          onClick={() => setActiveConfig('notification_types')}
+          className={cn("px-4 py-2 rounded-full text-sm font-bold", activeConfig === 'notification_types' ? "bg-[#5A5A40] text-white" : "bg-[#f5f5f0] text-[#5A5A40]")}
+        >
+          Tipos de Notificações
+        </button>
+        <button 
           onClick={() => setActiveConfig('import')}
           className={cn("px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2", activeConfig === 'import' ? "bg-[#5A5A40] text-white" : "bg-[#f5f5f0] text-[#5A5A40]")}
         >
           <FileSpreadsheet size={16} />
           Importar
+        </button>
+        <button 
+          onClick={() => setActiveConfig('branding')}
+          className={cn("px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2", activeConfig === 'branding' ? "bg-[#5A5A40] text-white" : "bg-[#f5f5f0] text-[#5A5A40]")}
+        >
+          <Upload size={16} />
+          Logotipo
         </button>
       </div>
 
@@ -2521,23 +3071,113 @@ function ConfigPanel({
             )}
           </div>
         </div>
+      ) : activeConfig === 'branding' ? (
+        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
+          <div className="bg-[#f5f5f0] p-6 rounded-2xl border border-dashed border-[#5A5A40]/20">
+            <h4 className="font-display font-bold tracking-tight text-lg mb-2">Identidade Visual & Logotipo</h4>
+            <p className="text-sm text-[#5A5A40]/70 mb-6">
+              Faça o upload do logotipo da sua instituição (por exemplo, IPEM-PR). Esta imagem será exibida nos cabeçalhos de todos os modelos de notificação oficiais gerados pelo sistema, incluindo as visualizações em tela e as exportações em PDF.
+            </p>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-start">
+              <div className="space-y-4">
+                <span className="text-xs font-bold uppercase tracking-wider text-[#5A5A40]/80 block">Upload do Logotipo</span>
+                
+                {/* Drag and Drop Zone */}
+                <div className="border border-gray-200 bg-white rounded-2xl p-6 shadow-sm flex flex-col gap-6">
+                  <div className="flex flex-col items-center justify-center border-2 border-dashed border-[#5A5A40]/30 rounded-2xl p-8 bg-gray-50 hover:bg-gray-100/50 transition-all cursor-pointer relative">
+                    <Upload size={32} className="text-[#5A5A40]/70 mb-3" />
+                    <span className="text-xs font-bold text-gray-700">Arraste a imagem da logo para cá...</span>
+                    <span className="text-[10px] text-gray-400 mt-1">ou clique para selecionar do computador</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="absolute inset-0 opacity-0 cursor-pointer"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        if (file.size > 2 * 1024 * 1024) {
+                          alert("A imagem selecionada é muito grande. Escolha uma imagem de até 2MB.");
+                          return;
+                        }
+                        const reader = new FileReader();
+                        reader.onloadend = () => {
+                          saveLogoUrl(reader.result as string);
+                        };
+                        reader.readAsDataURL(file);
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <span className="text-xs font-bold uppercase tracking-wider text-[#5A5A40]/80 block">Visualização do Logotipo Ativo</span>
+                <div className="bg-white border border-gray-200 rounded-2xl p-8 shadow-sm flex flex-col items-center justify-center min-h-[220px]">
+                  {logoUrl ? (
+                    <div className="space-y-6 text-center w-full">
+                      <div className="max-w-[240px] max-h-[100px] border border-gray-100 p-4 rounded-xl bg-gray-50 flex items-center justify-center mx-auto overflow-hidden">
+                        <img src={logoUrl} alt="Logo Ativa" className="max-h-[80px] w-auto object-contain" referrerPolicy="no-referrer" />
+                      </div>
+                      <div className="space-y-2">
+                        <p className="text-xs text-gray-550 font-medium">Logotipo personalizado ativo com sucesso.</p>
+                        <button
+                          type="button"
+                          onClick={() => saveLogoUrl('')}
+                          className="bg-red-50 text-red-650 hover:bg-red-100/60 font-bold text-xs py-2 px-4 rounded-xl transition-all"
+                        >
+                          Remover Logotipo Personalizado
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-center space-y-4">
+                      <div className="text-xs font-bold bg-gray-100 border border-gray-300 py-2 px-4 rounded-xl text-[#5A5A40] inline-block font-display">
+                        IPEM-PR (Texto Padrão)
+                      </div>
+                      <p className="text-xs text-gray-400 max-w-[240px]">Nenhum logotipo personalizado carregado. O sistema usará o texto padrão "IPEM-PR".</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       ) : (
         <>
+          <div className="mb-6">
+            <h3 className="font-display font-bold text-xl text-[#5A5A40] tracking-tight">
+              {activeConfig === 'pacs' ? 'Gerenciar PACs' : 
+               activeConfig === 'collabs' ? 'Gerenciar Colaboradores' : 
+               activeConfig === 'status' ? 'Gerenciar Status' : 
+               activeConfig === 'notification_types' ? 'Gerenciar Tipos de Notificações' :
+               'Gerenciar Motivos de Não-Conformidade'}
+            </h3>
+            <p className="text-xs text-[#5A5A40]/60 mt-1">
+              Adicione, edite ou exclua opções de preenchimento para as telas de recebimento de lotes.
+            </p>
+          </div>
           <div className="flex gap-2 mb-6">
-        <input 
-          type="text" 
-          placeholder={`Novo ${activeConfig === 'pacs' ? 'PAC' : activeConfig === 'collabs' ? 'Colaborador' : 'Status'}...`}
-          className="flex-1 p-3 bg-[#f5f5f0] border-none rounded-xl focus:ring-2 focus:ring-[#5A5A40]/20"
-          value={newItemName}
-          onChange={e => setNewItemName(e.target.value)}
-        />
-        <button 
-          onClick={handleAdd}
-          className="bg-[#5A5A40] text-white px-6 rounded-xl font-bold hover:bg-[#4a4a30]"
-        >
-          Adicionar
-        </button>
-      </div>
+            <input 
+              type="text" 
+              placeholder={
+                activeConfig === 'pacs' ? 'Novo PAC...' : 
+                activeConfig === 'collabs' ? 'Novo Colaborador...' : 
+                activeConfig === 'status' ? 'Novo Status...' : 
+                activeConfig === 'notification_types' ? 'Novo Tipo de Notificação...' :
+                'Novo Motivo de Não-Conformidade...'
+              }
+              className="flex-1 p-3 bg-[#f5f5f0] border-none rounded-xl focus:ring-2 focus:ring-[#5A5A40]/20"
+              value={newItemName}
+              onChange={e => setNewItemName(e.target.value)}
+            />
+            <button 
+              onClick={handleAdd}
+              className="bg-[#5A5A40] text-white px-6 rounded-xl font-bold hover:bg-[#4a4a30]"
+            >
+              Adicionar
+            </button>
+          </div>
 
       <div className="space-y-2">
         {items.map((item: any) => (
@@ -2567,7 +3207,7 @@ function ConfigPanel({
             ) : (
               <>
                 <span className="font-medium">{item.name}</span>
-                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="flex gap-1">
                   <button 
                     onClick={() => handleEdit(item.id, item.name)}
                     className="p-2 text-[#5A5A40] hover:bg-white rounded-lg transition-colors"
@@ -2587,6 +3227,22 @@ function ConfigPanel({
         ))}
       </div>
     </>
+  )}
+
+  {activeConfig === 'notification_types' && (
+    <div className="mt-10 pt-10 border-t border-gray-200">
+      <NotificationTemplatesManager
+        notificationTypes={notificationTypes}
+        setNotificationTypes={setNotificationTypes}
+        isLocalMode={isLocalMode}
+        handleFirestoreError={handleFirestoreError}
+        batches={batches}
+        pacs={pacs}
+        nonConformityRecords={nonConformityRecords}
+        nonConformitiesConfigs={nonConformitiesConfigs}
+        logoUrl={logoUrl}
+      />
+    </div>
   )}
 </div>
 );
@@ -3022,19 +3678,22 @@ function PacProductivitySection({
   const [selectedPacFilter, setSelectedPacFilter] = useState<string>('all');
   const [pacSortOrder, setPacSortOrder] = useState<'delivered_desc' | 'alphabetical'>('delivered_desc');
 
-  // Find all delivered batches in the stats period
+  // Find all delivered batches in the stats period (using RECEBIDO EM)
   const pacStats = useMemo(() => {
     return batches.filter(b => {
       const isFinished = b.conferidoPor && b.conferidoPor.trim() !== '';
       if (!isFinished) return false;
 
+      const dateObj = b.recebidoEm ? b.recebidoEm.toDate() : b.periodoInicial?.toDate();
+      if (!dateObj) return false;
+
       if (statsStartDate) {
         const start = startOfDay(parseLocalDate(statsStartDate));
-        if (b.periodoInicial.toDate() < start) return false;
+        if (dateObj < start) return false;
       }
       if (statsEndDate) {
         const end = startOfDay(parseLocalDate(statsEndDate));
-        if (startOfDay(b.periodoInicial.toDate()) > end) return false;
+        if (startOfDay(dateObj) > end) return false;
       }
       return true;
     });
@@ -3052,11 +3711,9 @@ function PacProductivitySection({
     const list = allPacNames.map(pacName => {
       const pacBatches = pacStats.filter(b => b.pac === pacName);
       const totalEnsaios = pacBatches.reduce((acc, b) => acc + b.numEnsaios, 0);
-      const batchCount = pacBatches.length;
       return {
         pac: pacName,
-        totalEnsaios,
-        batchCount
+        totalEnsaios
       };
     });
 
@@ -3114,61 +3771,104 @@ function PacProductivitySection({
     const pacBatchesInPeriod = pacStats.filter(b => b.pac === selectedPacFilter);
     
     // Group them
-    const groups: Record<string, { key: string, label: string, totalEnsaios: number, batchCount: number, dateObj: Date }> = {};
+    const groups: Record<string, { key: string, label: string, totalEnsaios: number, dateObj: Date }> = {};
     
     pacBatchesInPeriod.forEach(b => {
-      const date = b.periodoInicial.toDate();
+      const date = b.recebidoEm ? b.recebidoEm.toDate() : b.periodoInicial?.toDate();
+      if (!date) return;
       const { key, label } = getGroupKeyAndLabel(date, groupingType);
       if (!groups[key]) {
         groups[key] = {
           key,
           label,
           totalEnsaios: 0,
-          batchCount: 0,
           dateObj: date
         };
       }
       groups[key].totalEnsaios += b.numEnsaios;
-      groups[key].batchCount += 1;
     });
 
     // Sort chronologically
     return Object.values(groups).sort((a, b) => a.dateObj.getTime() - b.dateObj.getTime());
   }, [pacStats, selectedPacFilter, groupingType]);
 
-  // Render BarChart of PACs
-  const renderAllPacsChart = () => {
-    const chartData = pacGroupedData.filter(d => d.totalEnsaios > 0);
-    if (chartData.length === 0) {
+  // Grouped breakdown of all PACs by month/year (when selectedPacFilter is 'all' and groupingType !== 'day')
+  const allPacsBreakdownData = useMemo(() => {
+    if (selectedPacFilter !== 'all' || groupingType === 'day') return [];
+
+    const groups: Record<string, { key: string; label: string; pac: string; totalEnsaios: number; dateObj: Date }> = {};
+
+    pacStats.forEach(b => {
+      const date = b.recebidoEm ? b.recebidoEm.toDate() : b.periodoInicial?.toDate();
+      if (!date) return;
+      const { key, label } = getGroupKeyAndLabel(date, groupingType);
+      const compositeKey = `${key}_${b.pac}`;
+
+      if (!groups[compositeKey]) {
+        groups[compositeKey] = {
+          key,
+          label,
+          pac: b.pac || 'Sem PAC',
+          totalEnsaios: 0,
+          dateObj: date
+        };
+      }
+      groups[compositeKey].totalEnsaios += b.numEnsaios;
+    });
+
+    // Sort chronologically then by PAC
+    return Object.values(groups).sort((a, b) => {
+      const timeDiff = a.dateObj.getTime() - b.dateObj.getTime();
+      if (timeDiff !== 0) return timeDiff;
+      return a.pac.localeCompare(b.pac);
+    });
+  }, [pacStats, selectedPacFilter, groupingType]);
+
+  // Render chronological breakdown table for all PACs
+  const renderAllPacsBreakdownSection = () => {
+    if (groupingType === 'day') {
       return (
-        <div className="flex items-center justify-center h-64 bg-gray-50 border border-dashed border-[#e5e5e0] rounded-2xl text-xs text-[#5A5A40]/60 italic">
-          Nenhuma entrega registrada para plotar o gráfico.
+        <div className="flex flex-col items-center justify-center p-8 h-64 bg-gray-50 border border-dashed border-[#e5e5e0] rounded-2xl text-center leading-normal">
+          <BarChart3 size={32} className="text-[#5A5A40]/30 mb-2" />
+          <h5 className="text-xs font-bold text-[#5A5A40] opacity-80">Tabela de Evolução</h5>
+          <span className="text-[11px] text-[#5A5A40]/60 max-w-xs mt-1">
+            Selecione um período maior que 31 dias (mais de um mês ou ano) para carregar a tabela detalhada de evolução cronológica por período.
+          </span>
         </div>
       );
     }
 
     return (
-      <div className="h-72 w-full mt-4">
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={chartData} margin={{ top: 20, right: 30, left: 10, bottom: 40 }}>
-            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E5E0" />
-            <XAxis 
-              dataKey="pac" 
-              tick={{ fill: '#5A5A40', fontSize: 10 }}
-              axisLine={{ stroke: '#E5E5E0' }}
-              tickLine={{ stroke: '#E5E5E0' }}
-              interval={0}
-              angle={-25}
-              textAnchor="end"
-            />
-            <YAxis tick={{ fill: '#5A5A40', fontSize: 11 }} axisLine={false} tickLine={false} />
-            <Tooltip 
-              contentStyle={{ backgroundColor: 'white', borderRadius: '16px', border: '1px solid #E5E5E0', fontSize: '12px' }}
-              labelStyle={{ fontWeight: 'bold', color: '#1a1a1a' }}
-            />
-            <Bar dataKey="totalEnsaios" name="Ensaios Entregues" fill="#5A5A40" radius={[8, 8, 0, 0]} />
-          </BarChart>
-        </ResponsiveContainer>
+      <div className="overflow-x-auto max-h-[280px] overflow-y-auto mt-4 pr-1 scrollbar-thin">
+        <table className="w-full text-left">
+          <thead>
+            <tr className="text-[10px] uppercase font-bold text-[#5A5A40] opacity-50 border-b border-[#e5e5e0]">
+              <th className="pb-3">Período ({groupingType === 'month' ? 'Mês' : 'Ano'})</th>
+              <th className="pb-3">PAC</th>
+              <th className="pb-3 text-center">Ensaios Entregues</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-[#f5f5f0]">
+            {allPacsBreakdownData.map((row) => (
+              <tr key={`${row.key}_${row.pac}`} className="group hover:bg-[#f5f5f0]/50 transition-colors">
+                <td className="py-3 font-medium text-xs capitalize">{row.label}</td>
+                <td className="py-3 font-medium text-xs">{row.pac}</td>
+                <td className="py-3 text-center">
+                  <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-lg text-xs font-bold">
+                    {row.totalEnsaios}
+                  </span>
+                </td>
+              </tr>
+            ))}
+            {allPacsBreakdownData.length === 0 && (
+              <tr>
+                <td colSpan={3} className="py-8 text-center text-xs text-[#5A5A40] opacity-60 italic">
+                  Nenhuma entrega registrada para detalhar.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </div>
     );
   };
@@ -3267,7 +3967,6 @@ function PacProductivitySection({
               <thead>
                 <tr className="text-[10px] uppercase font-bold text-[#5A5A40] opacity-50 border-b border-[#e5e5e0]">
                   <th className="pb-4">PAC</th>
-                  <th className="pb-4 text-center">Quantidade de Lotes</th>
                   <th className="pb-4 text-center">Ensaios Entregues</th>
                 </tr>
               </thead>
@@ -3275,7 +3974,6 @@ function PacProductivitySection({
                 {pacGroupedData.map((row) => (
                   <tr key={row.pac} className="group hover:bg-[#f5f5f0]/50 transition-colors">
                     <td className="py-4 font-medium text-sm">{row.pac}</td>
-                    <td className="py-4 text-center text-xs text-[#5A5A40]/80 font-medium">{row.batchCount}</td>
                     <td className="py-4 text-center">
                       <span className="px-2 py-1 bg-[#5A5A40]/10 text-[#5A5A40] rounded-lg text-xs font-bold">
                         {row.totalEnsaios}
@@ -3285,7 +3983,7 @@ function PacProductivitySection({
                 ))}
                 {pacGroupedData.length === 0 && (
                   <tr>
-                    <td colSpan={3} className="py-8 text-center text-xs text-[#5A5A40] opacity-60 italic">
+                    <td colSpan={2} className="py-8 text-center text-xs text-[#5A5A40] opacity-60 italic">
                       Nenhum PAC cadastrado ou com entregas no período.
                     </td>
                   </tr>
@@ -3297,7 +3995,6 @@ function PacProductivitySection({
               <thead>
                 <tr className="text-[10px] uppercase font-bold text-[#5A5A40] opacity-50 border-b border-[#e5e5e0]">
                   <th className="pb-4">Período ({groupingType === 'day' ? 'Dia' : groupingType === 'month' ? 'Mês' : 'Ano'})</th>
-                  <th className="pb-4 text-center">Quantidade de Lotes</th>
                   <th className="pb-4 text-center">Ensaios Entregues</th>
                 </tr>
               </thead>
@@ -3305,7 +4002,6 @@ function PacProductivitySection({
                 {specificPacData.map((row) => (
                   <tr key={row.key} className="group hover:bg-[#f5f5f0]/50 transition-colors">
                     <td className="py-4 font-medium text-sm capitalize">{row.label}</td>
-                    <td className="py-4 text-center text-xs text-[#5A5A40]/80 font-medium">{row.batchCount}</td>
                     <td className="py-4 text-center">
                       <span className="px-2 py-1 bg-emerald-50 text-emerald-700 rounded-lg text-xs font-bold">
                         {row.totalEnsaios}
@@ -3315,7 +4011,7 @@ function PacProductivitySection({
                 ))}
                 {specificPacData.length === 0 && (
                   <tr>
-                    <td colSpan={3} className="py-8 text-center text-xs text-[#5A5A40] opacity-60 italic">
+                    <td colSpan={2} className="py-8 text-center text-xs text-[#5A5A40] opacity-60 italic">
                       Nenhuma entrega de ensaio registrada para {selectedPacFilter} no período selecionado.
                     </td>
                   </tr>
@@ -3328,9 +4024,11 @@ function PacProductivitySection({
         {/* Chart Column */}
         <div className="flex flex-col justify-center">
           <h4 className="text-xs font-bold uppercase tracking-wider text-[#5A5A40] opacity-75 mb-2">
-            {selectedPacFilter === 'all' ? 'Comparativo de Entregas por PAC' : `Gráfico Evolutivo: ${selectedPacFilter}`}
+            {selectedPacFilter === 'all' 
+              ? (groupingType !== 'day' ? 'Detalhamento de Entregas por Período e PAC' : 'Infomativo') 
+              : `Gráfico Evolutivo: ${selectedPacFilter}`}
           </h4>
-          {selectedPacFilter === 'all' ? renderAllPacsChart() : renderSpecificPacChart()}
+          {selectedPacFilter === 'all' ? renderAllPacsBreakdownSection() : renderSpecificPacChart()}
         </div>
       </div>
     </div>

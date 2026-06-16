@@ -17,6 +17,13 @@ service cloud.firestore {
       return data.name is string && data.name.size() > 0;
     }
 
+    function isValidNonConformity(data) {
+      return data.recebimento_lote_id is string && data.recebimento_lote_id.size() > 0 &&
+             data.nao_conformidade_id is string && data.nao_conformidade_id.size() > 0 &&
+             data.pac_id is string && data.pac_id.size() > 0 &&
+             data.placas is list;
+    }
+
     match /batches/{batchId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() && isValidBatch(request.resource.data);
@@ -39,6 +46,26 @@ service cloud.firestore {
     match /statuses/{statusId} {
       allow read: if isAuthenticated();
       allow create, update: if isAuthenticated() && isValidConfig(request.resource.data);
+      allow delete: if isAuthenticated();
+    }
+
+    match /non_conformities_configs/{configId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() && isValidConfig(request.resource.data);
+      allow delete: if isAuthenticated();
+    }
+
+    match /notification_types/{typeId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /notifications/{notificationId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /lote_nao_conformidades/{nonConformityId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() && isValidNonConformity(request.resource.data);
       allow delete: if isAuthenticated();
     }
   }
