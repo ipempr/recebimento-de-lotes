@@ -94,6 +94,15 @@
         "status": { "type": "string" }
       },
       "required": ["pac_id", "pac_name", "notification_type_id", "notification_type_name", "batches", "createdAt", "status"]
+    },
+    "Branding": {
+      "title": "Branding",
+      "description": "Global settings for branding and authorized signatures.",
+      "type": "object",
+      "properties": {
+        "logoUrl": { "type": "string" },
+        "signatures": { "type": "array" }
+      }
     }
   },
   "firestore": {
@@ -128,6 +137,10 @@
     "/notifications/{notificationId}": {
       "schema": "Notification",
       "description": "Collection of logged notifications."
+    },
+    "/configs/{configId}": {
+      "schema": "Branding",
+      "description": "Branding and other configuration documents."
     }
   }
 }

@@ -49,6 +49,7 @@ interface NotificationsPanelProps {
   isLocalMode: boolean;
   handleFirestoreError: (err: any, op: string, col: string) => void;
   logoUrl?: string;
+  signatures?: any[];
 }
 
 interface GroupedNC {
@@ -66,7 +67,8 @@ export default function NotificationsPanel({
   setGeneratedNotifications,
   isLocalMode,
   handleFirestoreError,
-  logoUrl = ''
+  logoUrl = '',
+  signatures = []
 }: NotificationsPanelProps) {
   
   const [selectedBatchForDetails, setSelectedBatchForDetails] = useState<any | null>(null);
@@ -80,6 +82,7 @@ export default function NotificationsPanel({
 
   // Template Preview states inside NotificationsPanel
   const [viewingNotification, setViewingNotification] = useState<any | null>(null);
+  const [selectedSignatureId, setSelectedSignatureId] = useState<string>('');
   const [previewChannel, setPreviewChannel] = useState<'oficio' | 'email' | 'whatsapp'>('oficio');
   const [copiedPreviewSuccess, setCopiedPreviewSuccess] = useState<boolean>(false);
 
@@ -265,22 +268,22 @@ export default function NotificationsPanel({
     const templates = nType?.templates || {
       oficio: {
         title: 'NOTIFICAÇÃO DE AUTUAÇÃO',
-        processHeader: `Processo IMETRO-SC 52603.000007/2026-31\nde ${formatDateShort(item.createdAt || new Date())}.`,
-        intro: 'O Instituto de Metrologia de Santa Catarina - IMETRO/SC abriu um processo administrativo contra:',
+        processHeader: `Processo IPEM-PR 52603.000007/2026-31\nde ${formatDateShort(item.createdAt || new Date())}.`,
+        intro: 'O Instituto de Pesos e Medidas do Paraná - IPEM-PR abriu um processo administrativo contra:',
         sections: [
           { id: '1', icon: 'search', title: 'MOTIVO', content: 'Identificamos a(s) irregularidade(s) descrita(s) no auto de infração em anexo.\nNúmero do Auto de Infração: 3218663\n\nNo lote analisado, composto de {total_ensaios} ensaios, identificamos {erros_encontrados} desvios, o que corresponde a um percentual de irregularidade de {percentual_erro}%.\n\nRelação de placas com não-conformidades encontradas:\n{placas_nao_conformes}' },
-          { id: '2', icon: 'check-square', title: 'COMO SE DEFENDER?', content: 'Você poderá apresentar a defesa por escrito em até 10(dez) dias, contados da data de recebimento desta notificação. Na defesa, informe:\n\n1. Nome do órgão que o notificou: IMETRO-SC;\n2. Nome, CPF/CNPJ e assinatura;\n3. Número do Processo e do(s) Auto(s) de Infração;\n4. Motivo da defesa detalhado.' },
+          { id: '2', icon: 'check-square', title: 'COMO SE DEFENDER?', content: 'Você poderá apresentar a defesa por escrito em até 10(dez) dias, contados da data de recebimento desta notificação. Na defesa, informe:\n\n1. Nome do órgão que o notificou: IPEM-PR;\n2. Nome, CPF/CNPJ e assinatura;\n3. Número do Processo e do(s) Auto(s) de Infração;\n4. Motivo da defesa detalhado.' },
           { id: '3', icon: 'alert-triangle', title: 'IMPORTANTE', content: 'Você deve enviar uma cópia do seu documento de identificação oficial junto com a defesa. E se você estiver representado por procurador legal, não esqueça de encaminhar a procuração.' },
-          { id: '4', icon: 'send', title: 'PARA ONDE ENVIAR?', content: 'Envie sua defesa para o IMETRO-SC, localizado em São José, na R. DO IANO, 1791, bairro Nossa Senhora do Rosário, CEP 88110-603.' },
-          { id: '5', icon: 'help-circle', title: 'DÚVIDAS?', content: 'Envie e-mail para inmetro-sc@imetro.sc.gov.br ou entre em contato pelo telefone (0XX48) 3381-5200.' }
+          { id: '4', icon: 'send', title: 'PARA ONDE ENVIAR?', content: 'Envie sua defesa para o IPEM-PR, localizado em Curitiba, na Rua Estados Unidos, 1354, bairro Bacacheri, CEP 82510-050.' },
+          { id: '5', icon: 'help-circle', title: 'DÚVIDAS?', content: 'Envie e-mail para ouvidoria@ipem.pr.gov.br ou entre em contato pelo telefone (41) 3251-2200.' }
         ]
       },
       email: {
         subject: 'Notificação Urgente de Irregularidade - PAC {pac_nome}',
-        body: 'Prezados,\n\nConstatamos não-conformidades técnicas nos lotes do PAC {pac_nome}.\n\n{motivo_detalhes}\n\nReiteramos que o percentual de falhas detectadas foi de {percentual_erro}%. Verifique as instruções abaixo para apresentar a defesa prévia em até 10 dias corridos.\n\nAtenciosamente,\nIMETRO-SC.'
+        body: 'Prezados,\n\nConstatamos não-conformidades técnicas nos lotes do PAC {pac_nome}.\n\n{motivo_detalhes}\n\nReiteramos que o percentual de falhas detectadas foi de {percentual_erro}%. Verifique as instruções abaixo para apresentar a defesa prévia em até 10 dias corridos.\n\nAtenciosamente,\nIPEM-PR.'
       },
       whatsapp: {
-        template: '⚠️ *NOTIFICAÇÃO DE AUTUAÇÃO - IMETRO-SC*\n\nInformamos que foi aberto o processo administrativo para o *PAC {pac_nome}* devido a desvios encontrados nos ensaios.\n\n*Índice de Irregularidades:* {percentual_erro}% ({erros_encontrados} falhas de {total_ensaios} ensaios).\n\n📄 *Placas Não-Conformes:* \n{placas_nao_conformes}\n\n⚖️ *Como se defender?*\nVocê possui até 10 dias úteis para apresentar recurso formalizado por escrito para o IMETRO-SC, contendo justificativas, documento de identificação e procuração (caso aplicável).\n\nDúvidas: inmetro-sc@imetro.sc.gov.br ou (48) 3381-5200.'
+        template: '⚠️ *NOTIFICAÇÃO DE AUTUAÇÃO - IPEM-PR*\n\nInformamos que foi aberto o processo administrativo para o *PAC {pac_nome}* devido a desvios encontrados nos ensaios.\n\n*Índice de Irregularidades:* {percentual_erro}% ({erros_encontrados} falhas de {total_ensaios} ensaios).\n\n📄 *Placas Não-Conformes:* \n{placas_nao_conformes}\n\n⚖️ *Como se defender?*\nVocê possui até 10 dias úteis para apresentar recurso formalizado por escrito para o IPEM-PR, contendo justificativas, documento de identificação e procuração (caso aplicável).\n\nDúvidas: ouvidoria@ipem.pr.gov.br ou (41) 3251-2200.'
       }
     };
 
@@ -378,7 +381,7 @@ export default function NotificationsPanel({
     const sectionsHTML = editableOficioSections.map(s => {
       const formattedContent = (s.content || '').replace(/\n/g, '<br/>');
       return `
-        <div style="display: flex; margin-bottom: 24px; font-family: sans-serif;">
+        <div class="section-item" style="display: flex; margin-bottom: 24px; font-family: sans-serif; page-break-inside: avoid; break-inside: avoid;">
           <div style="flex: 0 0 60px; text-align: center; border-right: 1px solid #e2e8f0; margin-right: 20px; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding-top: 5px;">
             <div style="background-color: #f1f5f9; padding: 12px; border-radius: 12px; color: #475569; width: 42px; height: 42px; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: bold; border: 1px solid #e2e8f0;">
               ${getIconEmoji(s.icon)}
@@ -393,14 +396,49 @@ export default function NotificationsPanel({
       `;
     }).join('');
 
+    const activeSignature = (signatures || []).find((sig: any) => sig.id === selectedSignatureId);
+
+    const signatureHTML = activeSignature ? `
+      <div style="margin-top: 45px; display: flex; flex-direction: column; align-items: center; text-align: center; page-break-inside: avoid; break-inside: avoid; font-family: sans-serif;">
+        <div style="height: 60px; display: flex; align-items: center; justify-content: center; margin-bottom: 4px;">
+          <img src="${activeSignature.imageUrl}" style="max-height: 55px; max-width: 180px; object-fit: contain;" />
+        </div>
+        <div style="font-size: 12px; font-weight: bold; color: #1e293b; border-top: 1px solid #cbd5e1; padding-top: 6px; width: 260px; font-family: Arial, sans-serif;">
+          ${activeSignature.name}
+        </div>
+        <div style="font-size: 9px; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; margin-top: 3px; font-weight: bold;">
+          ${activeSignature.role}
+        </div>
+      </div>
+    ` : '';
+
     printWindow.document.write(`
       <html>
         <head>
           <title>${editableOficioTitle} - ${viewingNotification?.pac_name}</title>
           <style>
             @media print {
-              body { margin: 2cm; -webkit-print-color-adjust: exact; }
+              body { margin: 2.2cm 1.8cm; -webkit-print-color-adjust: exact; padding-bottom: 50px; }
               .no-print { display: none; }
+              .section-item { page-break-inside: avoid; break-inside: avoid; }
+              .page-footer {
+                position: fixed;
+                bottom: 0px;
+                left: 0;
+                right: 0;
+                display: flex !important;
+                justify-content: space-between;
+                align-items: center;
+                border-top: 1px solid #cbd5e1;
+                padding-top: 8px;
+                font-size: 9px;
+                color: #64748b;
+                font-family: Arial, sans-serif;
+              }
+              .page-footer::after {
+                counter-increment: page;
+                content: "Página " counter(page);
+              }
             }
             body { 
               font-family: Arial, Helvetica, sans-serif;
@@ -452,6 +490,8 @@ export default function NotificationsPanel({
               margin-bottom: 30px;
               font-size: 14px;
               border: 1px solid #e2e8f0;
+              page-break-inside: avoid;
+              break-inside: avoid;
             }
             .action-bar {
               text-align: center;
@@ -494,7 +534,7 @@ export default function NotificationsPanel({
             ${editableOficioIntro}
           </div>
 
-          <div class="target-box">
+          <div class="target-box print-avoid-break">
             <strong>EMPRESA NOTIFICADA:</strong> ${viewingNotification?.pac_name}<br/>
             <strong>CNPJ/ID:</strong> 02.943.486/0001-70
           </div>
@@ -503,8 +543,14 @@ export default function NotificationsPanel({
             ${sectionsHTML}
           </div>
 
-          <div style="margin-top: 60px; text-align: center; font-size: 13px; color: #64748b; border-top: 1px solid #cbd5e1; padding-top: 20px;">
+          ${signatureHTML}
+
+          <div style="margin-top: 60px; text-align: center; font-size: 13px; color: #64748b; border-top: 1px solid #cbd5e1; padding-top: 20px; page-break-inside: avoid; break-inside: avoid;">
             Documento gerado eletronicamente pelo Sistema de Recebimento de Lotes IPEM-PR.
+          </div>
+
+          <div class="page-footer" style="display: none;">
+            <span>IPEM-PR • Sistema Lotes • Documento Autenticado</span>
           </div>
 
           <script>
@@ -1016,6 +1062,20 @@ export default function NotificationsPanel({
                         />
                       </div>
 
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold uppercase text-gray-405 block">Assinatura de Ofício</label>
+                        <select
+                          className="w-full p-2.5 bg-white border border-[#e5e5e0] rounded-xl text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-[#5A5A40]/30"
+                          value={selectedSignatureId}
+                          onChange={e => setSelectedSignatureId(e.target.value)}
+                        >
+                          <option value="">Nenhuma Assinatura (Texto Padrão)</option>
+                          {signatures && signatures.map((sig: any) => (
+                            <option key={sig.id} value={sig.id}>{sig.name} ({sig.role})</option>
+                          ))}
+                        </select>
+                      </div>
+
                       <div className="space-y-3 pt-2">
                         <span className="text-[10px] font-bold uppercase text-[#5A5A40] block border-b border-gray-200 pb-1">Seções Editáveis do Modelo</span>
                         {editableOficioSections.map((section: any) => (
@@ -1167,11 +1227,27 @@ export default function NotificationsPanel({
                       </div>
 
                       {/* Digital print signature trace */}
-                      <div className="pt-6 border-t border-gray-100 flex flex-col items-center text-center space-y-1">
-                        <div className="w-40 border-b border-gray-300"></div>
-                        <span className="text-[10px] text-gray-500 font-bold uppercase mt-1">IMETRO-SC Setor Metrológico</span>
-                        <span className="text-[8px] text-gray-400">Emissão Eletrônica Autenticada</span>
-                      </div>
+                      {selectedSignatureId && signatures.find((s: any) => s.id === selectedSignatureId) ? (
+                        (() => {
+                          const sig = signatures.find((s: any) => s.id === selectedSignatureId);
+                          return (
+                            <div className="pt-6 border-t border-gray-200 flex flex-col items-center text-center space-y-1">
+                              <div className="h-[55px] flex items-center justify-center mb-1">
+                                <img src={sig.imageUrl} alt={sig.name} className="max-h-[50px] w-auto object-contain" referrerPolicy="no-referrer" />
+                              </div>
+                              <div className="w-48 border-b border-gray-200"></div>
+                              <span className="text-[10px] text-gray-800 font-bold mt-1 inline-block">{sig.name}</span>
+                              <span className="text-[8px] text-gray-400 uppercase font-mono">{sig.role}</span>
+                            </div>
+                          );
+                        })()
+                      ) : (
+                        <div className="pt-6 border-t border-gray-100 flex flex-col items-center text-center space-y-1">
+                          <div className="w-40 border-b border-gray-300"></div>
+                          <span className="text-[10px] text-gray-500 font-bold uppercase mt-1">IPEM-PR Setor Metrológico</span>
+                          <span className="text-[8px] text-gray-400">Emissão Eletrônica Autenticada</span>
+                        </div>
+                      )}
 
                     </div>
                   ) : previewChannel === 'email' ? (

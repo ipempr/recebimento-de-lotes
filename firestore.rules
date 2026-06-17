@@ -68,5 +68,9 @@ service cloud.firestore {
       allow create, update: if isAuthenticated() && isValidNonConformity(request.resource.data);
       allow delete: if isAuthenticated();
     }
+
+    match /configs/{configId} {
+      allow read, write: if isAuthenticated();
+    }
   }
 }

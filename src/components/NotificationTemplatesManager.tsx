@@ -61,6 +61,7 @@ interface NotificationTemplatesManagerProps {
   nonConformityRecords: any[];
   nonConformitiesConfigs: any[];
   logoUrl?: string;
+  signatures?: any[];
 }
 
 export default function NotificationTemplatesManager({
@@ -72,7 +73,8 @@ export default function NotificationTemplatesManager({
   pacs,
   nonConformityRecords,
   nonConformitiesConfigs,
-  logoUrl = ''
+  logoUrl = '',
+  signatures = []
 }: NotificationTemplatesManagerProps) {
   
   const [selectedTypeId, setSelectedTypeId] = useState<string>('');
@@ -81,20 +83,21 @@ export default function NotificationTemplatesManager({
   
   // Local template editor states
   const [oficioTitle, setOficioTitle] = useState('NOTIFICAÇÃO DE AUTUAÇÃO');
-  const [oficioProcessHeader, setOficioProcessHeader] = useState('Processo IMETRO-SC 52603.000007/2026-31\nde 02 de julho de 2026.');
-  const [oficioIntro, setOficioIntro] = useState('O Instituto de Metrologia de Santa Catarina - IMETRO/SC abriu um processo administrativo contra:');
+  const [oficioSignatureId, setOficioSignatureId] = useState<string>('');
+  const [oficioProcessHeader, setOficioProcessHeader] = useState('Processo IPEM-PR 52603.000007/2026-31\nde 02 de julho de 2026.');
+  const [oficioIntro, setOficioIntro] = useState('O Instituto de Pesos e Medidas do Paraná - IPEM-PR abriu um processo administrativo contra:');
   const [oficioSections, setOficioSections] = useState<any[]>([
     { id: '1', icon: 'search', title: 'MOTIVO', content: 'Identificamos a(s) irregularidade(s) descrita(s) no auto de infração em anexo.\nNúmero do Auto de Infração: 3218663\n\nNo lote analisado, composto de {total_ensaios} ensaios, identificamos {erros_encontrados} desvios, o que corresponde a um percentual de irregularidade de {percentual_erro}%.\n\nRelação de placas com não-conformidades encontradas:\n{placas_nao_conformes}' },
-    { id: '2', icon: 'check-square', title: 'COMO SE DEFENDER?', content: 'Você poderá apresentar a defesa por escrito em até 10(dez) dias, contados da data de recebimento desta notificação. Na defesa, informe:\n\n1. Nome do órgão que o notificou: IMETRO-SC;\n2. Nome, CPF/CNPJ e assinatura;\n3. Número do Processo e do(s) Auto(s) de Infração;\n4. Motivo da defesa detalhado.' },
+    { id: '2', icon: 'check-square', title: 'COMO SE DEFENDER?', content: 'Você poderá apresentar a defesa por escrito em até 10(dez) dias, contados da data de recebimento desta notificação. Na defesa, informe:\n\n1. Nome do órgão que o notificou: IPEM-PR;\n2. Nome, CPF/CNPJ and assinatura;\n3. Número do Processo e do(s) Auto(s) de Infração;\n4. Motivo da defesa detalhado.' },
     { id: '3', icon: 'alert-triangle', title: 'IMPORTANTE', content: 'Você deve enviar uma cópia do seu documento de identificação oficial junto com a defesa. E se você estiver representado por procurador legal, não esqueça de encaminhar a procuração.' },
-    { id: '4', icon: 'send', title: 'PARA ONDE ENVIAR?', content: 'Envie sua defesa para o IMETRO-SC, localizado em São José, na R. DO IANO, 1791, bairro Nossa Senhora do Rosário, CEP 88110-603.' },
-    { id: '5', icon: 'help-circle', title: 'DÚVIDAS?', content: 'Envie e-mail para inmetro-sc@imetro.sc.gov.br ou entre em contato pelo telefone (0XX48) 3381-5200.' }
+    { id: '4', icon: 'send', title: 'PARA ONDE ENVIAR?', content: 'Envie sua defesa para o IPEM-PR, localizado em Curitiba, na Rua Estados Unidos, 1354, bairro Bacacheri, CEP 82510-050.' },
+    { id: '5', icon: 'help-circle', title: 'DÚVIDAS?', content: 'Envie e-mail para ouvidoria@ipem.pr.gov.br ou entre em contato pelo telefone (41) 3251-2200.' }
   ]);
 
   const [emailSubject, setEmailSubject] = useState('Notificação Urgente de Irregularidade - PAC {pac_nome}');
-  const [emailBody, setEmailBody] = useState('Prezados,\n\nConstatamos não-conformidades técnicas nos lotes do PAC {pac_nome}.\n\n{motivo_detalhes}\n\nReiteramos que o percentual de falhas detectadas foi de {percentual_erro}%. Verifique as instruções abaixo para apresentar a defesa prévia em até 10 dias corridos.\n\nAtenciosamente,\nIMETRO-SC.');
+  const [emailBody, setEmailBody] = useState('Prezados,\n\nConstatamos não-conformidades técnicas nos lotes do PAC {pac_nome}.\n\n{motivo_detalhes}\n\nReiteramos que o percentual de falhas detectadas foi de {percentual_erro}%. Verifique as instruções abaixo para apresentar a defesa prévia em até 10 dias corridos.\n\nAtenciosamente,\nIPEM-PR.');
 
-  const [whatsappTemplate, setWhatsappTemplate] = useState('⚠️ *NOTIFICAÇÃO DE AUTUAÇÃO - IMETRO-SC*\n\nInformamos que foi aberto o processo administrativo para o *PAC {pac_nome}* devido a desvios encontrados nos ensaios.\n\n*Índice de Irregularidades:* {percentual_erro}% ({erros_encontrados} falhas de {total_ensaios} ensaios).\n\n📄 *Placas Não-Conformes:* \n{placas_nao_conformes}\n\n⚖️ *Como se defender?*\nVocê possui até 10 dias úteis para apresentar recurso formalizado por escrito para o IMETRO-SC, contendo justificativas, documento de identificação e procuração (caso aplicável).\n\nDúvidas: inmetro-sc@imetro.sc.gov.br ou (48) 3381-5200.');
+  const [whatsappTemplate, setWhatsappTemplate] = useState('⚠️ *NOTIFICAÇÃO DE AUTUAÇÃO - IPEM-PR*\n\nInformamos que foi aberto o processo administrativo para o *PAC {pac_nome}* devido a desvios encontrados nos ensaios.\n\n*Índice de Irregularidades:* {percentual_erro}% ({erros_encontrados} falhas de {total_ensaios} ensaios).\n\n📄 *Placas Não-Conformes:* \n{placas_nao_conformes}\n\n⚖️ *Como se defender?*\nVocê possui até 10 dias úteis para apresentar recurso formalizado por escrito para o IPEM-PR, contendo justificativas, documento de identificação e procuração (caso aplicável).\n\nDúvidas: ouvidoria@ipem.pr.gov.br ou (41) 3251-2200.');
 
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -108,9 +111,10 @@ export default function NotificationTemplatesManager({
         const t = selectedType.templates;
         if (t.oficio) {
           setOficioTitle(t.oficio.title || 'NOTIFICAÇÃO DE AUTUAÇÃO');
-          setOficioProcessHeader(t.oficio.processHeader || 'Processo IMETRO-SC 52603.000007/2026-31\nde 02 de julho de 2026.');
+          setOficioProcessHeader(t.oficio.processHeader || 'Processo IPEM-PR 52603.000007/2026-31\nde 02 de julho de 2026.');
           setOficioIntro(t.oficio.intro || '');
           setOficioSections(t.oficio.sections || []);
+          setOficioSignatureId(t.oficio.signatureId || '');
         }
         if (t.email) {
           setEmailSubject(t.email.subject || '');
@@ -122,18 +126,19 @@ export default function NotificationTemplatesManager({
       } else {
         // Fallback to default templates
         setOficioTitle('NOTIFICAÇÃO DE AUTUAÇÃO');
-        setOficioProcessHeader('Processo IMETRO-SC 52603.000007/2026-31\nde 02 de julho de 2026.');
-        setOficioIntro('O Instituto de Metrologia de Santa Catarina - IMETRO/SC abriu um processo administrativo contra:');
+        setOficioProcessHeader('Processo IPEM-PR 52603.000007/2026-31\nde 02 de julho de 2026.');
+        setOficioIntro('O Instituto de Pesos e Medidas do Paraná - IPEM-PR abriu um processo administrativo contra:');
         setOficioSections([
           { id: '1', icon: 'search', title: 'MOTIVO', content: 'Identificamos a(s) irregularidade(s) descrita(s) no auto de infração em anexo.\nNúmero do Auto de Infração: 3218663\n\nNo lote analisado, composto de {total_ensaios} ensaios, identificamos {erros_encontrados} desvios, o que corresponde a um percentual de irregularidade de {percentual_erro}%.\n\nRelação de placas com não-conformidades encontradas:\n{placas_nao_conformes}' },
-          { id: '2', icon: 'check-square', title: 'COMO SE DEFENDER?', content: 'Você poderá apresentar a defesa por escrito em até 10(dez) dias, contados da data de recebimento desta notificação. Na defesa, informe:\n\n1. Nome do órgão que o notificou: IMETRO-SC;\n2. Nome, CPF/CNPJ e assinatura;\n3. Número do Processo e do(s) Auto(s) de Infração;\n4. Motivo da defesa detalhado.' },
+          { id: '2', icon: 'check-square', title: 'COMO SE DEFENDER?', content: 'Você poderá apresentar a defesa por escrito em até 10(dez) dias, contados da data de recebimento desta notificação. Na defesa, informe:\n\n1. Nome do órgão que o notificou: IPEM-PR;\n2. Nome, CPF/CNPJ e assinatura;\n3. Número do Processo e do(s) Auto(s) de Infração;\n4. Motivo da defesa detalhado.' },
           { id: '3', icon: 'alert-triangle', title: 'IMPORTANTE', content: 'Você deve enviar uma cópia do seu documento de identificação oficial junto com a defesa. E se você estiver representado por procurador legal, não esqueça de encaminhar a procuração.' },
-          { id: '4', icon: 'send', title: 'PARA ONDE ENVIAR?', content: 'Envie sua defesa para o IMETRO-SC, localizado em São José, na R. DO IANO, 1791, bairro Nossa Senhora do Rosário, CEP 88110-603.' },
-          { id: '5', icon: 'help-circle', title: 'DÚVIDAS?', content: 'Envie e-mail para inmetro-sc@imetro.sc.gov.br ou entre em contato pelo telefone (0XX48) 3381-5200.' }
+          { id: '4', icon: 'send', title: 'PARA ONDE ENVIAR?', content: 'Envie sua defesa para o IPEM-PR, localizado em Curitiba, na Rua Estados Unidos, 1354, bairro Bacacheri, CEP 82510-050.' },
+          { id: '5', icon: 'help-circle', title: 'DÚVIDAS?', content: 'Envie e-mail para ouvidoria@ipem.pr.gov.br ou entre em contato pelo telefone (41) 3251-2200.' }
         ]);
         setEmailSubject('Notificação Urgente de Irregularidade - PAC {pac_nome}');
-        setEmailBody('Prezados,\n\nConstatamos não-conformidades técnicas nos lotes do PAC {pac_nome}.\n\n{motivo_detalhes}\n\nReiteramos que o percentual de falhas detectadas foi de {percentual_erro}%. Verifique as instruções abaixo para apresentar a defesa prévia em até 10 dias corridos.\n\nAtenciosamente,\nIMETRO-SC.');
-        setWhatsappTemplate('⚠️ *NOTIFICAÇÃO DE AUTUAÇÃO - IMETRO-SC*\n\nInformamos que foi aberto o processo administrativo para o *PAC {pac_nome}* devido a desvios encontrados nos ensaios.\n\n*Índice de Irregularidades:* {percentual_erro}% ({erros_encontrados} falhas de {total_ensaios} ensaios).\n\n📄 *Placas Não-Conformes:* \n{placas_nao_conformes}\n\n⚖️ *Como se defender?*\nVocê possui até 10 dias úteis para apresentar recurso formalizado por escrito para o IMETRO-SC, contendo justificativas, documento de identificação e procuração (caso aplicável).\n\nDúvidas: inmetro-sc@imetro.sc.gov.br ou (48) 3381-5200.');
+        setEmailBody('Prezados,\n\nConstatamos não-conformidades técnicas nos lotes do PAC {pac_nome}.\n\n{motivo_detalhes}\n\nReiteramos que o percentual de falhas detectadas foi de {percentual_erro}%. Verifique as instruções abaixo para apresentar a defesa prévia em até 10 dias corridos.\n\nAtenciosamente,\nIPEM-PR.');
+        setWhatsappTemplate('⚠️ *NOTIFICAÇÃO DE AUTUAÇÃO - IPEM-PR*\n\nInformamos que foi aberto o processo administrativo para o *PAC {pac_nome}* devido a desvios encontrados nos ensaios.\n\n*Índice de Irregularidades:* {percentual_erro}% ({erros_encontrados} falhas de {total_ensaios} ensaios).\n\n📄 *Placas Não-Conformes:* \n{placas_nao_conformes}\n\n⚖️ *Como se defender?*\nVocê possui até 10 dias úteis para apresentar recurso formalizado por escrito para o IPEM-PR, contendo justificativas, documento de identificação e procuração (caso aplicável).\n\nDúvidas: ouvidoria@ipem.pr.gov.br ou (41) 3251-2200.');
+        setOficioSignatureId('');
       }
     }
   }, [selectedTypeId, notificationTypes]);
@@ -150,7 +155,8 @@ export default function NotificationTemplatesManager({
         title: oficioTitle,
         processHeader: oficioProcessHeader,
         intro: oficioIntro,
-        sections: oficioSections
+        sections: oficioSections,
+        signatureId: oficioSignatureId
       },
       email: {
         subject: emailSubject,
@@ -326,6 +332,7 @@ export default function NotificationTemplatesManager({
 
   // Trigger high fidelity PDF Print Dialogue
   const handlePrintPDF = () => {
+    const currentSignatureObj = signatures.find((s: any) => s.id === oficioSignatureId);
     // Generate simple printable element in a new print window to maintain pristine design of Santa Catarina's layout
     const printWindow = window.open('', '_blank');
     if (!printWindow) return;
@@ -349,7 +356,7 @@ export default function NotificationTemplatesManager({
     const sectionsHTML = oficioSections.map(s => {
       const formattedContent = renderTemplateText(s.content).replace(/\n/g, '<br/>');
       return `
-        <div style="display: flex; margin-bottom: 24px; font-family: sans-serif;">
+        <div class="print-avoid-break" style="display: flex; margin-bottom: 24px; font-family: sans-serif; page-break-inside: avoid; break-inside: avoid;">
           <div style="flex: 0 0 60px; text-align: center; border-right: 1px solid #e2e8f0; margin-right: 20px; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding-top: 5px;">
             <div style="background-color: #f1f5f9; padding: 12px; border-radius: 12px; color: #475569; width: 42px; height: 42px; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: bold; border: 1px solid #e2e8f0;">
               ${getIconEmoji(s.icon)}
@@ -370,8 +377,16 @@ export default function NotificationTemplatesManager({
           <title>${renderTemplateText(oficioTitle)} - ${metrics.pacName}</title>
           <style>
             @media print {
-              body { margin: 2cm; -webkit-print-color-adjust: exact; }
+              body { 
+                margin: 1.5cm 2cm; 
+                -webkit-print-color-adjust: exact; 
+                print-color-adjust: exact; 
+              }
               .no-print { display: none; }
+              .print-avoid-break { 
+                page-break-inside: avoid !important; 
+                break-inside: avoid !important; 
+              }
             }
             body { 
               font-family: Arial, Helvetica, sans-serif;
@@ -429,6 +444,12 @@ export default function NotificationTemplatesManager({
               margin-bottom: 30px;
               font-size: 14px;
               border: 1px solid #e2e8f0;
+              page-break-inside: avoid;
+              break-inside: avoid;
+            }
+            .print-avoid-break {
+              page-break-inside: avoid;
+              break-inside: avoid;
             }
             .action-bar {
               text-align: center;
@@ -471,7 +492,7 @@ export default function NotificationTemplatesManager({
             ${renderTemplateText(oficioIntro)}
           </div>
 
-          <div class="target-box">
+          <div class="target-box print-avoid-break">
             <strong>EMPRESA NOTIFICADA:</strong> ${metrics.pacName}<br/>
             <strong>CNPJ/ID:</strong> ${metrics.cnpj}
           </div>
@@ -480,7 +501,21 @@ export default function NotificationTemplatesManager({
             ${sectionsHTML}
           </div>
 
-          <div style="margin-top: 60px; text-align: center; font-size: 13px; color: #64748b; border-top: 1px solid #cbd5e1; padding-top: 20px;">
+          ${currentSignatureObj ? `
+            <div class="print-avoid-break" style="margin-top: 45px; display: flex; flex-direction: column; align-items: center; text-align: center; font-family: sans-serif; page-break-inside: avoid; break-inside: avoid;">
+              <img src="${currentSignatureObj.imageUrl}" style="max-height: 50px; width: auto; object-fit: contain; margin-bottom: 2px;" />
+              <div style="width: 220px; border-top: 1.5px solid #cbd5e1; padding-top: 5px; margin: 2px auto 0 auto;">
+                <h5 style="margin: 0; font-size: 12px; font-weight: bold; color: #1e293b;">${currentSignatureObj.name}</h5>
+                <p style="margin: 2px 0 0 0; font-size: 9px; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; font-family: monospace;">${currentSignatureObj.role}</p>
+              </div>
+            </div>
+          ` : `
+            <div class="print-avoid-break" style="margin-top: 35px; text-align: center; font-size: 11px; color: #64748b; font-family: sans-serif; font-style: italic; page-break-inside: avoid; break-inside: avoid;">
+              Documento assinado eletronicamente pelo Sistema de Recebimento de Lotes IPEM-PR.
+            </div>
+          `}
+
+          <div class="print-avoid-break" style="margin-top: 45px; text-align: center; font-size: 12px; color: #64748b; border-top: 1px solid #cbd5e1; padding-top: 15px; page-break-inside: avoid; break-inside: avoid;">
             Documento gerado eletronicamente pelo Sistema de Recebimento de Lotes IPEM-PR.
           </div>
 
@@ -497,6 +532,8 @@ export default function NotificationTemplatesManager({
     `);
     printWindow.document.close();
   };
+
+  const selectedSignatureObj = signatures.find(s => s.id === oficioSignatureId);
 
   return (
     <div className="bg-white rounded-[32px] border border-[#e5e5e0] p-6 space-y-6">
@@ -629,6 +666,22 @@ export default function NotificationTemplatesManager({
                       value={oficioIntro}
                       onChange={e => setOficioIntro(e.target.value)}
                     />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold uppercase text-[#5A5A40]">Assinatura Padrão do Ofício</label>
+                    <select
+                      className="w-full p-3 bg-[#f5f5f0] border-none rounded-xl text-sm font-semibold cursor-pointer"
+                      value={oficioSignatureId}
+                      onChange={e => setOficioSignatureId(e.target.value)}
+                    >
+                      <option value="">(Sem assinatura - Texto padrão de emissão eletrônica)</option>
+                      {signatures.map((sig: any) => (
+                        <option key={sig.id} value={sig.id}>
+                          {sig.name} ({sig.role})
+                        </option>
+                      ))}
+                    </select>
                   </div>
 
                   <div className="space-y-4 pt-2">
@@ -850,6 +903,32 @@ export default function NotificationTemplatesManager({
                       );
                     })}
                   </div>
+
+                  {/* Representative Signature Block inside live preview */}
+                  <div className="pt-4 border-t border-gray-100 flex flex-col items-center text-center mt-6">
+                    {selectedSignatureObj ? (
+                      <div className="flex flex-col items-center">
+                        <img 
+                          src={selectedSignatureObj.imageUrl} 
+                          alt="Assinatura" 
+                          className="max-h-[50px] w-auto object-contain mb-1" 
+                          referrerPolicy="no-referrer"
+                        />
+                        <div className="w-[180px] border-t border-gray-200 mt-1 pt-1">
+                          <h5 className="font-bold text-[10px] text-gray-800 leading-tight">
+                            {selectedSignatureObj.name}
+                          </h5>
+                          <p className="text-[8px] text-gray-400 uppercase tracking-wider font-mono mt-0.5">
+                            {selectedSignatureObj.role}
+                          </p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-[9px] text-gray-400 italic">
+                        Documento assinado eletronicamente pelo Sistema de Recebimento de Lotes IPEM-PR.
+                      </div>
+                    )}
+                  </div>
                 </div>
               ) : activeChannel === 'email' ? (
                 // Email container simulation
@@ -872,9 +951,9 @@ export default function NotificationTemplatesManager({
                 // WhatsApp window viewport simulation
                 <div className="bg-[#efeae2] rounded-2xl border border-gray-300 shadow-md font-sans text-xs overflow-hidden max-w-sm mx-auto">
                   <div className="bg-[#075e54] p-3 flex items-center text-white gap-2">
-                    <div className="w-8 h-8 rounded-full bg-teal-100 text-teal-800 flex items-center justify-center font-bold">IM</div>
+                    <div className="w-8 h-8 rounded-full bg-teal-100 text-teal-800 flex items-center justify-center font-bold">IP</div>
                     <div>
-                      <h4 className="font-bold text-[11px] leading-tight">IMETRO-SC Notificações</h4>
+                      <h4 className="font-bold text-[11px] leading-tight">IPEM-PR Notificações</h4>
                       <p className="text-[8px] opacity-70">Conta Comercial</p>
                     </div>
                   </div>

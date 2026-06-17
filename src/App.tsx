@@ -51,7 +51,8 @@ import {
   Download,
   Upload,
   Loader2,
-  ChevronDown
+  ChevronDown,
+  Copy
 } from 'lucide-react';
 import { format, addDays, differenceInDays, isAfter, isBefore, startOfDay, parse } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -295,8 +296,24 @@ export default function App() {
   const [notificationTypes, setNotificationTypes] = useState<ConfigItem[]>([]);
   const [generatedNotifications, setGeneratedNotifications] = useState<any[]>([]);
   
+  interface Signature {
+    id: string;
+    name: string;
+    role: string;
+    imageUrl: string;
+  }
+
   const [logoUrl, setLogoUrl] = useState<string>(() => {
     return localStorage.getItem('lotes_logoUrl') || '';
+  });
+
+  const [signatures, setSignatures] = useState<Signature[]>(() => {
+    try {
+      const saved = localStorage.getItem('lotes_signatures');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
   });
 
   const saveLogoUrl = async (newUrl: string) => {
@@ -308,9 +325,23 @@ export default function App() {
     }
     if (!isLocalMode) {
       try {
-        await setDoc(doc(db, 'configs', 'branding'), { logoUrl: newUrl });
+        await setDoc(doc(db, 'configs', 'branding'), { logoUrl: newUrl }, { merge: true });
       } catch (err) {
         console.error("Erro ao salvar logo no Firestore:", err);
+        handleFirestoreError(err, OperationType.WRITE, 'configs/branding');
+      }
+    }
+  };
+
+  const saveSignatures = async (newSigs: Signature[]) => {
+    setSignatures(newSigs);
+    localStorage.setItem('lotes_signatures', JSON.stringify(newSigs));
+    if (!isLocalMode) {
+      try {
+        await setDoc(doc(db, 'configs', 'branding'), { signatures: newSigs }, { merge: true });
+      } catch (err) {
+        console.error("Erro ao salvar assinaturas no Firestore:", err);
+        handleFirestoreError(err, OperationType.WRITE, 'configs/branding');
       }
     }
   };
@@ -631,12 +662,18 @@ export default function App() {
       (snapshot) => {
         if (snapshot.exists()) {
           const data = snapshot.data();
-          if (data && data.logoUrl !== undefined) {
-            setLogoUrl(data.logoUrl);
-            if (data.logoUrl) {
-              localStorage.setItem('lotes_logoUrl', data.logoUrl);
-            } else {
-              localStorage.removeItem('lotes_logoUrl');
+          if (data) {
+            if (data.logoUrl !== undefined) {
+              setLogoUrl(data.logoUrl);
+              if (data.logoUrl) {
+                localStorage.setItem('lotes_logoUrl', data.logoUrl);
+              } else {
+                localStorage.removeItem('lotes_logoUrl');
+              }
+            }
+            if (data.signatures !== undefined) {
+              setSignatures(data.signatures);
+              localStorage.setItem('lotes_signatures', JSON.stringify(data.signatures));
             }
           }
         }
@@ -1185,6 +1222,7 @@ export default function App() {
             isLocalMode={isLocalMode}
             handleFirestoreError={handleFirestoreError}
             logoUrl={logoUrl}
+            signatures={signatures}
           />
         ) : (
           <ConfigPanel 
@@ -1207,6 +1245,8 @@ export default function App() {
             setNotificationTypes={setNotificationTypes}
             logoUrl={logoUrl}
             saveLogoUrl={saveLogoUrl}
+            signatures={signatures}
+            saveSignatures={saveSignatures}
           />
         )}
       </main>
@@ -2025,12 +2065,20 @@ function ConfigPanel({
   setNonConformitiesConfigs,
   setNotificationTypes,
   logoUrl,
-  saveLogoUrl
+  saveLogoUrl,
+  signatures,
+  saveSignatures
 }: any) {
   const [activeConfig, setActiveConfig] = useState<'pacs' | 'collabs' | 'status' | 'non_conformities' | 'notification_types' | 'import' | 'branding'>('pacs');
   const [newItemName, setNewItemName] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState('');
+
+  // Signature Form States
+  const [sigName, setSigName] = useState('');
+  const [sigRole, setSigRole] = useState('');
+  const [sigImage, setSigImage] = useState('');
+  const [editingSigId, setEditingSigId] = useState<string | null>(null);
 
   // Import State
   const [importLink, setImportLink] = useState('');
@@ -2733,6 +2781,32 @@ function ConfigPanel({
     }
   };
 
+  const handleCopyNotificationType = async (item: any) => {
+    const copyName = `${item.name} - Cópia`;
+    const templatesCopy = item.templates ? JSON.parse(JSON.stringify(item.templates)) : null;
+
+    if (isLocalMode) {
+      const copiedItem = {
+        id: 'local-cfg-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9),
+        name: copyName,
+        templates: templatesCopy
+      };
+      const sorted = [...notificationTypes, copiedItem].sort((a, b) => a.name.localeCompare(b.name));
+      setNotificationTypes(sorted);
+      localStorage.setItem('lotes_notification_types', JSON.stringify(sorted));
+      return;
+    }
+
+    try {
+      await addDoc(collection(db, 'notification_types'), {
+        name: copyName,
+        templates: templatesCopy
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, 'notification_types');
+    }
+  };
+
   const handleDelete = (id: string) => {
     const collectionName = 
       activeConfig === 'pacs' ? 'pacs' : 
@@ -2814,7 +2888,7 @@ function ConfigPanel({
           className={cn("px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2", activeConfig === 'branding' ? "bg-[#5A5A40] text-white" : "bg-[#f5f5f0] text-[#5A5A40]")}
         >
           <Upload size={16} />
-          Logotipo
+          Identidade Visual
         </button>
       </div>
 
@@ -3072,18 +3146,20 @@ function ConfigPanel({
           </div>
         </div>
       ) : activeConfig === 'branding' ? (
-        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
-          <div className="bg-[#f5f5f0] p-6 rounded-2xl border border-dashed border-[#5A5A40]/20">
-            <h4 className="font-display font-bold tracking-tight text-lg mb-2">Identidade Visual & Logotipo</h4>
-            <p className="text-sm text-[#5A5A40]/70 mb-6">
-              Faça o upload do logotipo da sua instituição (por exemplo, IPEM-PR). Esta imagem será exibida nos cabeçalhos de todos os modelos de notificação oficiais gerados pelo sistema, incluindo as visualizações em tela e as exportações em PDF.
-            </p>
+        <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-300 text-[#1e293b]">
+          
+          {/* Card 1: Logotipo */}
+          <div className="bg-[#f5f5f0] p-6 rounded-2xl border border-dashed border-[#5A5A40]/20 space-y-6">
+            <div>
+              <h4 className="font-display font-bold tracking-tight text-lg mb-1">Logotipo da Instituição</h4>
+              <p className="text-sm text-[#5A5A40]/70">
+                Faça o upload do logotipo da sua instituição (por exemplo, IPEM-PR). Esta imagem será exibida nos cabeçalhos de todos os modelos de notificação oficiais gerados pelo sistema.
+              </p>
+            </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-start">
               <div className="space-y-4">
                 <span className="text-xs font-bold uppercase tracking-wider text-[#5A5A40]/80 block">Upload do Logotipo</span>
-                
-                {/* Drag and Drop Zone */}
                 <div className="border border-gray-200 bg-white rounded-2xl p-6 shadow-sm flex flex-col gap-6">
                   <div className="flex flex-col items-center justify-center border-2 border-dashed border-[#5A5A40]/30 rounded-2xl p-8 bg-gray-50 hover:bg-gray-100/50 transition-all cursor-pointer relative">
                     <Upload size={32} className="text-[#5A5A40]/70 mb-3" />
@@ -3142,6 +3218,230 @@ function ConfigPanel({
               </div>
             </div>
           </div>
+
+          {/* Card 2: Assinaturas */}
+          <div className="bg-[#f5f5f0] p-6 rounded-2xl border border-dashed border-[#5A5A40]/20 space-y-6">
+            <div>
+              <h4 className="font-display font-bold tracking-tight text-lg mb-1">Assinaturas Autorizadas</h4>
+              <p className="text-sm text-[#5A5A40]/70">
+                Cadastre e gerencie as assinaturas digitalizadas dos responsáveis e agentes que assinam as notificações oficiais geradas pelo sistema. Recomenda-se assinaturas com fundo transparente.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+              {/* Form to Register Signature */}
+              <div className="lg:col-span-5 bg-white border border-gray-200 rounded-3xl p-6 shadow-sm space-y-4">
+                <h5 className="font-bold text-sm text-[#1e293b] border-b border-gray-100 pb-2 flex items-center justify-between">
+                  <span className="flex items-center gap-2">
+                    <Upload size={16} className="text-[#5A5A40]" />
+                    {editingSigId ? "Alterar Assinatura" : "Cadastrar Assinatura"}
+                  </span>
+                  {editingSigId && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingSigId(null);
+                        setSigName("");
+                        setSigRole("");
+                        setSigImage("");
+                      }}
+                      className="text-[10px] text-[#5A5A40] hover:text-red-500 font-bold uppercase transition-colors"
+                      title="Cancelar edição e voltar a cadastrar"
+                    >
+                      Cancelar
+                    </button>
+                  )}
+                </h5>
+                <form 
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (!sigName.trim() || !sigRole.trim() || !sigImage) {
+                      alert("Por favor, preencha o nome, cargo e selecione a imagem da assinatura.");
+                      return;
+                    }
+                    const currentSigs = Array.isArray(signatures) ? signatures : [];
+                    if (editingSigId) {
+                      const updated = currentSigs.map((s: any) => 
+                        s.id === editingSigId 
+                          ? { ...s, name: sigName.trim(), role: sigRole.trim(), imageUrl: sigImage }
+                          : s
+                      );
+                      saveSignatures(updated);
+                      setEditingSigId(null);
+                    } else {
+                      const newSig = {
+                        id: 'sig_' + Date.now(),
+                        name: sigName.trim(),
+                        role: sigRole.trim(),
+                        imageUrl: sigImage
+                      };
+                      saveSignatures([...currentSigs, newSig]);
+                    }
+                    setSigName('');
+                    setSigRole('');
+                    setSigImage('');
+                  }} 
+                  className="space-y-4"
+                >
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold uppercase text-gray-500 block">Nome do Signatário</label>
+                    <input
+                      type="text"
+                      className="w-full text-xs font-semibold p-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#5A5A40]"
+                      placeholder="Ex: João da Silva"
+                      value={sigName}
+                      onChange={(e) => setSigName(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold uppercase text-gray-500 block">Cargo / Função</label>
+                    <input
+                      type="text"
+                      className="w-full text-xs font-semibold p-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#5A5A40]"
+                      placeholder="Ex: Agente Fiscal Metrológico"
+                      value={sigRole}
+                      onChange={(e) => setSigRole(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold uppercase text-gray-500 block">Imagem da Assinatura Digitalizada</label>
+                    
+                    {sigImage ? (
+                      <div className="space-y-3">
+                        <div className="border border-dashed border-gray-200 rounded-xl bg-gray-50 p-4 flex items-center justify-center max-h-[100px] overflow-hidden">
+                          <img src={sigImage} alt="Assinatura Previsualização" className="max-h-[85px] w-auto object-contain" />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setSigImage('')}
+                          className="text-[10px] font-bold text-red-650 hover:bg-red-50 py-1.5 px-3 rounded-lg transition-colors border border-red-250 w-full"
+                        >
+                          Trocar Imagem
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center justify-center border border-dashed border-[#5A5A40]/30 rounded-xl p-6 bg-gray-50 hover:bg-gray-150/40 cursor-pointer relative min-h-[110px] transition-colors">
+                        <Upload size={20} className="text-[#5A5A40]/60 mb-1" />
+                        <span className="text-[10px] font-bold text-gray-600">Fazer Upload de Assinatura</span>
+                        <span className="text-[8px] text-gray-400 mt-0.5">PNG, JPG, BMP até 1MB</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="absolute inset-0 opacity-0 cursor-pointer"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            if (file.size > 1 * 1024 * 1024) {
+                              alert("A imagem selecionada é muito grande. Escolha uma imagem de até 1MB.");
+                              return;
+                            }
+                            const reader = new FileReader();
+                            reader.onloadend = () => {
+                              setSigImage(reader.result as string);
+                            };
+                            reader.readAsDataURL(file);
+                          }}
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="w-full bg-[#5A5A40] text-white hover:bg-[#4a4a30] font-bold text-xs py-2.5 px-4 rounded-xl transition-all shadow-sm flex items-center justify-center gap-1.5 mt-2"
+                  >
+                    {editingSigId ? (
+                      <>
+                        <Check size={14} />
+                        Salvar Alterações
+                      </>
+                    ) : (
+                      <>
+                        <Plus size={14} />
+                        Cadastrar Assinatura
+                      </>
+                    )}
+                  </button>
+                </form>
+              </div>
+
+              {/* List of Registered Signatures */}
+              <div className="lg:col-span-7 bg-white border border-gray-200 rounded-3xl p-6 shadow-sm min-h-[380px] flex flex-col">
+                <h5 className="font-bold text-sm text-[#1e293b] border-b border-gray-100 pb-2 flex justify-between items-center">
+                  <span>Assinaturas Cadastradas ({signatures?.length || 0})</span>
+                </h5>
+
+                <div className="flex-1 overflow-y-auto mt-4 max-h-[400px]">
+                  {Array.isArray(signatures) && signatures.length > 0 ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {signatures.map((sig: any) => (
+                        <div key={sig.id} className="border border-gray-150 rounded-2xl p-4 bg-gray-50 flex flex-col justify-between hover:shadow-sm transition-all relative group">
+                          
+                          {/* Action Buttons: Edit and Delete */}
+                          <div className="absolute top-2 right-2 flex gap-1 bg-white/90 rounded-lg p-0.5 shadow-sm border border-gray-200 backdrop-blur-xs">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingSigId(sig.id);
+                                setSigName(sig.name);
+                                setSigRole(sig.role);
+                                setSigImage(sig.imageUrl || '');
+                              }}
+                              className="p-1 text-[#5A5A40] hover:bg-gray-150 rounded transition-colors"
+                              title="Alterar / Substituir Assinatura"
+                            >
+                              <Edit3 size={13} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (confirm(`Excluir a assinatura de ${sig.name}?`)) {
+                                  saveSignatures((signatures || []).filter((s: any) => s.id !== sig.id));
+                                  if (editingSigId === sig.id) {
+                                    setEditingSigId(null);
+                                    setSigName('');
+                                    setSigRole('');
+                                    setSigImage('');
+                                  }
+                                }
+                              }}
+                              className="p-1 text-red-500 hover:bg-red-50 rounded transition-colors"
+                              title="Remover Assinatura"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+
+                          {/* Signature stamp representation */}
+                          <div className="flex flex-col items-center text-center mt-3 mb-1">
+                            <div className="h-[60px] flex items-center justify-center mb-1">
+                              <img src={sig.imageUrl} alt={sig.name} className="max-h-[55px] max-w-[150px] object-contain" referrerPolicy="no-referrer" />
+                            </div>
+                            <div className="w-11/12 border-t border-gray-200 pt-1.5 mt-1">
+                              <h6 className="font-bold text-[11px] text-gray-800 leading-tight">{sig.name}</h6>
+                              <p className="text-[9px] text-gray-400 uppercase font-mono mt-0.5 tracking-tight">{sig.role}</p>
+                            </div>
+                          </div>
+
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-16 flex flex-col items-center justify-center h-full text-gray-400">
+                      <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center text-gray-400 mb-2">
+                        <Upload size={20} />
+                      </div>
+                      <p className="text-xs font-semibold">Nenhuma assinatura cadastrada.</p>
+                      <p className="text-[10px] text-gray-400 max-w-[200px] mt-1 mx-auto text-center">Cadastre uma assinatura no formulário ao lado para utilizá-la nos documentos oficiais.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
         </div>
       ) : (
         <>
@@ -3208,6 +3508,15 @@ function ConfigPanel({
               <>
                 <span className="font-medium">{item.name}</span>
                 <div className="flex gap-1">
+                  {activeConfig === 'notification_types' && (
+                    <button 
+                      onClick={() => handleCopyNotificationType(item)}
+                      className="p-2 text-[#5A5A40] hover:bg-white rounded-lg transition-all mr-1"
+                      title="Copiar Modelo de Notificação"
+                    >
+                      <Copy size={16} />
+                    </button>
+                  )}
                   <button 
                     onClick={() => handleEdit(item.id, item.name)}
                     className="p-2 text-[#5A5A40] hover:bg-white rounded-lg transition-colors"
@@ -3241,6 +3550,7 @@ function ConfigPanel({
         nonConformityRecords={nonConformityRecords}
         nonConformitiesConfigs={nonConformitiesConfigs}
         logoUrl={logoUrl}
+        signatures={signatures}
       />
     </div>
   )}
