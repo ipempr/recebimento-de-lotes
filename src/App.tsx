@@ -128,6 +128,8 @@ interface ConfigItem {
   id: string;
   name: string;
   color?: string;
+  rule?: any;
+  templates?: any;
 }
 
 class LocalTimestamp {
@@ -292,6 +294,7 @@ export default function App() {
   const [collaborators, setCollaborators] = useState<ConfigItem[]>([]);
   const [statuses, setStatuses] = useState<ConfigItem[]>([]);
   const [nonConformitiesConfigs, setNonConformitiesConfigs] = useState<ConfigItem[]>([]);
+  const [framings, setFramings] = useState<any[]>([]);
   const [nonConformityRecords, setNonConformityRecords] = useState<any[]>([]);
   const [notificationTypes, setNotificationTypes] = useState<ConfigItem[]>([]);
   const [generatedNotifications, setGeneratedNotifications] = useState<any[]>([]);
@@ -563,6 +566,20 @@ export default function App() {
         localStorage.setItem('lotes_lote_nao_conformidades', JSON.stringify(initialNonConforRecords));
       }
 
+      // Load local framings (enquadramentos)
+      const savedFramings = localStorage.getItem('lotes_framings');
+      let initialFramings: any[] = [];
+      if (savedFramings) {
+        initialFramings = JSON.parse(savedFramings);
+      } else {
+        initialFramings = [
+          { id: 'f1', number: 'Art. 12', description: 'Peso líquido abaixo do limite legal tolerado' },
+          { id: 'f2', number: 'Art. 18 Sec. I', description: 'Falta de lacre de segurança' },
+          { id: 'f3', number: 'Art. 22', description: 'Divergência grosseira no diâmetro nominal' }
+        ];
+        localStorage.setItem('lotes_framings', JSON.stringify(initialFramings));
+      }
+
       // Load local notification types
       const savedNotificationTypes = localStorage.getItem('lotes_notification_types');
       let initialNotificationTypes: ConfigItem[] = [];
@@ -570,9 +587,57 @@ export default function App() {
         initialNotificationTypes = JSON.parse(savedNotificationTypes);
       } else {
         initialNotificationTypes = [
-          { id: 'nt1', name: 'Notificação de Irregularidade' },
-          { id: 'nt2', name: 'Termo de Ocorrência' },
-          { id: 'nt3', name: 'Auto de Infração' }
+          { 
+            id: 'nt1', 
+            name: 'Notificação de Irregularidade',
+            rule: {
+              active: true,
+              validadeMeses: 12,
+              criterioA_ativo: true,
+              criterioA_ncId: '',
+              criterioA_limite: 5,
+              criterioB_ativo: true,
+              criterioB_ncId: '',
+              criterioB_limite: 10,
+              operadorLogico: 'OU',
+              limiteNotificacoes: 2,
+              proximoNivel_typeId: 'nt2'
+            }
+          },
+          { 
+            id: 'nt2', 
+            name: 'Termo de Ocorrência',
+            rule: {
+              active: true,
+              validadeMeses: 6,
+              criterioA_ativo: true,
+              criterioA_ncId: '',
+              criterioA_limite: 10,
+              criterioB_ativo: true,
+              criterioB_ncId: '',
+              criterioB_limite: 15,
+              operadorLogico: 'E',
+              limiteNotificacoes: 1,
+              proximoNivel_typeId: 'nt3'
+            }
+          },
+          { 
+            id: 'nt3', 
+            name: 'Auto de Infração',
+            rule: {
+              active: true,
+              validadeMeses: 6,
+              criterioA_ativo: true,
+              criterioA_ncId: '',
+              criterioA_limite: 15,
+              criterioB_ativo: false,
+              criterioB_ncId: '',
+              criterioB_limite: 20,
+              operadorLogico: 'OU',
+              limiteNotificacoes: 3,
+              proximoNivel_typeId: ''
+            }
+          }
         ];
         localStorage.setItem('lotes_notification_types', JSON.stringify(initialNotificationTypes));
       }
@@ -591,6 +656,7 @@ export default function App() {
       setCollaborators(initialCollabs.sort((a, b) => a.name.localeCompare(b.name)));
       setStatuses(initialStatuses.sort((a, b) => a.name.localeCompare(b.name)));
       setNonConformitiesConfigs(initialNonConforConfigs.sort((a, b) => a.name.localeCompare(b.name)));
+      setFramings(initialFramings.sort((a, b) => a.number ? a.number.localeCompare(b.number) : 0));
       setNonConformityRecords(initialNonConforRecords);
       setNotificationTypes(initialNotificationTypes.sort((a, b) => a.name.localeCompare(b.name)));
       setGeneratedNotifications(initialGeneratedNotifications);
@@ -651,6 +717,12 @@ export default function App() {
       (err) => handleFirestoreError(err, OperationType.LIST, 'notification_types')
     );
 
+    const unsubFramings = onSnapshot(
+      collection(db, 'framings'),
+      (snapshot) => setFramings(snapshot.docs.map(d => ({ id: d.id, ...d.data() })).sort((a: any, b: any) => (a.number || '').localeCompare(b.number || ''))),
+      (err) => handleFirestoreError(err, OperationType.LIST, 'framings')
+    );
+
     const unsubNotifications = onSnapshot(
       collection(db, 'notifications'),
       (snapshot) => setGeneratedNotifications(snapshot.docs.map(d => ({ id: d.id, ...d.data() }))),
@@ -689,6 +761,7 @@ export default function App() {
       unsubNonConforConfigs();
       unsubNonConforRecords();
       unsubNotificationTypes();
+      unsubFramings();
       unsubNotifications();
       unsubLogo();
     };
@@ -873,7 +946,7 @@ export default function App() {
     }
   };
 
-  const handleUpdateConfig = async (type: string, id: string, name: string) => {
+  const handleUpdateConfig = async (type: string, id: string, name: string, extraFields?: any) => {
     if (isLocalMode) {
       if (type === 'pacs') {
         const updated = pacs.map(p => p.id === id ? { ...p, name } : p).sort((a, b) => a.name.localeCompare(b.name));
@@ -888,7 +961,7 @@ export default function App() {
         setStatuses(updated);
         localStorage.setItem('lotes_statuses', JSON.stringify(updated));
       } else if (type === 'non_conformities_configs') {
-        const updated = nonConformitiesConfigs.map(s => s.id === id ? { ...s, name } : s).sort((a, b) => a.name.localeCompare(b.name));
+        const updated = nonConformitiesConfigs.map(s => s.id === id ? { ...s, name, ...(extraFields || {}) } : s).sort((a, b) => a.name.localeCompare(b.name));
         setNonConformitiesConfigs(updated);
         localStorage.setItem('lotes_non_conformities_configs', JSON.stringify(updated));
       } else if (type === 'notification_types') {
@@ -899,7 +972,7 @@ export default function App() {
       return;
     }
     try {
-      await updateDoc(doc(db, type, id), { name });
+      await updateDoc(doc(db, type, id), { name, ...(extraFields || {}) });
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `${type}/${id}`);
     }
@@ -1232,6 +1305,8 @@ export default function App() {
             nonConformitiesConfigs={nonConformitiesConfigs}
             nonConformityRecords={nonConformityRecords}
             notificationTypes={notificationTypes}
+            framings={framings}
+            setFramings={setFramings}
             handleFirestoreError={handleFirestoreError}
             onUpdate={handleUpdateConfig}
             setConfigToDelete={setConfigToDelete}
@@ -2053,6 +2128,8 @@ function ConfigPanel({
   nonConformitiesConfigs,
   nonConformityRecords,
   notificationTypes,
+  framings,
+  setFramings,
   handleFirestoreError, 
   onUpdate, 
   setConfigToDelete, 
@@ -2073,6 +2150,18 @@ function ConfigPanel({
   const [newItemName, setNewItemName] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState('');
+
+  // States for enquadramentos
+  const [framingSearch, setFramingSearch] = useState('');
+  const [newFramingNumber, setNewFramingNumber] = useState('');
+  const [newFramingDescription, setNewFramingDescription] = useState('');
+  const [editingFramingId, setEditingFramingId] = useState<string | null>(null);
+  const [editingFramingNumber, setEditingFramingNumber] = useState('');
+  const [editingFramingDescription, setEditingFramingDescription] = useState('');
+
+  // States for linking non-conformity config to framing
+  const [selectedFramingId, setSelectedFramingId] = useState('');
+  const [editingConfigFramingId, setEditingConfigFramingId] = useState('');
 
   // Signature Form States
   const [sigName, setSigName] = useState('');
@@ -2766,16 +2855,32 @@ function ConfigPanel({
         setNotificationTypes(sorted);
         localStorage.setItem('lotes_notification_types', JSON.stringify(sorted));
       } else {
-        const sorted = [...nonConformitiesConfigs, newItem].sort((a, b) => a.name.localeCompare(b.name));
+        const selectedFraming = framings.find((f: any) => f.id === selectedFramingId);
+        const newItemWithFraming = {
+          ...newItem,
+          framingId: selectedFramingId || '',
+          framingNumber: selectedFraming ? selectedFraming.number : '',
+          framingDescription: selectedFraming ? selectedFraming.description : ''
+        };
+        const sorted = [...nonConformitiesConfigs, newItemWithFraming].sort((a, b) => a.name.localeCompare(b.name));
         setNonConformitiesConfigs(sorted);
         localStorage.setItem('lotes_non_conformities_configs', JSON.stringify(sorted));
       }
       setNewItemName('');
+      setSelectedFramingId('');
       return;
     }
     try {
-      await addDoc(collection(db, collectionName), { name: newItemName });
+      const dataToAdd: any = { name: newItemName };
+      if (collectionName === 'non_conformities_configs') {
+        const selectedFraming = framings.find((f: any) => f.id === selectedFramingId);
+        dataToAdd.framingId = selectedFramingId || '';
+        dataToAdd.framingNumber = selectedFraming ? selectedFraming.number : '';
+        dataToAdd.framingDescription = selectedFraming ? selectedFraming.description : '';
+      }
+      await addDoc(collection(db, collectionName), dataToAdd);
       setNewItemName('');
+      setSelectedFramingId('');
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, collectionName);
     }
@@ -2816,9 +2921,12 @@ function ConfigPanel({
     setConfigToDelete({ type: collectionName, id });
   };
 
-  const handleEdit = (id: string, currentName: string) => {
-    setEditingId(id);
-    setEditingValue(currentName);
+  const handleEdit = (item: any) => {
+    setEditingId(item.id);
+    setEditingValue(item.name);
+    if (activeConfig === 'non_conformities') {
+      setEditingConfigFramingId(item.framingId || '');
+    }
   };
 
   const handleSaveEdit = async () => {
@@ -2828,12 +2936,155 @@ function ConfigPanel({
       activeConfig === 'collabs' ? 'collaborators' : 
       activeConfig === 'status' ? 'statuses' : 
       activeConfig === 'notification_types' ? 'notification_types' : 'non_conformities_configs';
+    
+    let extraFields: any = undefined;
+    if (collectionName === 'non_conformities_configs') {
+      const selectedFraming = framings.find((f: any) => f.id === editingConfigFramingId);
+      extraFields = {
+        framingId: editingConfigFramingId || '',
+        framingNumber: selectedFraming ? selectedFraming.number : '',
+        framingDescription: selectedFraming ? selectedFraming.description : ''
+      };
+    }
+
     try {
-      await onUpdate(collectionName, editingId, editingValue.trim());
+      await onUpdate(collectionName, editingId, editingValue.trim(), extraFields);
       setEditingId(null);
       setEditingValue('');
+      setEditingConfigFramingId('');
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `${collectionName}/${editingId}`);
+    }
+  };
+
+  const handleAddFraming = async () => {
+    if (!newFramingNumber.trim() || !newFramingDescription.trim()) return;
+    
+    if (isLocalMode) {
+      const newFraming = {
+        id: 'local-framing-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9),
+        number: newFramingNumber.trim(),
+        description: newFramingDescription.trim()
+      };
+      const updated = [...framings, newFraming].sort((a, b) => a.number.localeCompare(b.number));
+      setFramings(updated);
+      localStorage.setItem('lotes_framings', JSON.stringify(updated));
+      setNewFramingNumber('');
+      setNewFramingDescription('');
+      return;
+    }
+    
+    try {
+      await addDoc(collection(db, 'framings'), {
+        number: newFramingNumber.trim(),
+        description: newFramingDescription.trim()
+      });
+      setNewFramingNumber('');
+      setNewFramingDescription('');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, 'framings');
+    }
+  };
+
+  const handleStartEditFraming = (f: any) => {
+    setEditingFramingId(f.id);
+    setEditingFramingNumber(f.number);
+    setEditingFramingDescription(f.description);
+  };
+
+  const handleSaveEditFraming = async () => {
+    if (!editingFramingId || !editingFramingNumber.trim() || !editingFramingDescription.trim()) return;
+    
+    if (isLocalMode) {
+      const updated = framings.map(f => f.id === editingFramingId ? {
+        ...f,
+        number: editingFramingNumber.trim(),
+        description: editingFramingDescription.trim()
+      } : f).sort((a, b) => a.number.localeCompare(b.number));
+      
+      setFramings(updated);
+      localStorage.setItem('lotes_framings', JSON.stringify(updated));
+      
+      // Update linked values in non_conformities_configs
+      const updatedNCConfigs = nonConformitiesConfigs.map((nc: any) => {
+        if (nc.framingId === editingFramingId) {
+          return {
+            ...nc,
+            framingNumber: editingFramingNumber.trim(),
+            framingDescription: editingFramingDescription.trim()
+          };
+        }
+        return nc;
+      });
+      setNonConformitiesConfigs(updatedNCConfigs);
+      localStorage.setItem('lotes_non_conformities_configs', JSON.stringify(updatedNCConfigs));
+
+      setEditingFramingId(null);
+      setEditingFramingNumber('');
+      setEditingFramingDescription('');
+      return;
+    }
+    
+    try {
+      await updateDoc(doc(db, 'framings', editingFramingId), {
+        number: editingFramingNumber.trim(),
+        description: editingFramingDescription.trim()
+      });
+      
+      // Also update matching configs in Firestore
+      const matching = nonConformitiesConfigs.filter((nc: any) => nc.framingId === editingFramingId);
+      for (const m of matching) {
+        await updateDoc(doc(db, 'non_conformities_configs', m.id), {
+          framingNumber: editingFramingNumber.trim(),
+          framingDescription: editingFramingDescription.trim()
+        });
+      }
+
+      setEditingFramingId(null);
+      setEditingFramingNumber('');
+      setEditingFramingDescription('');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `framings/${editingFramingId}`);
+    }
+  };
+
+  const handleDeleteFraming = async (id: string) => {
+    if (isLocalMode) {
+      const updated = framings.filter(f => f.id !== id);
+      setFramings(updated);
+      localStorage.setItem('lotes_framings', JSON.stringify(updated));
+      
+      // Remove linked enquadramento from configs
+      const updatedNCConfigs = nonConformitiesConfigs.map((nc: any) => {
+        if (nc.framingId === id) {
+          return {
+            ...nc,
+            framingId: '',
+            framingNumber: '',
+            framingDescription: ''
+          };
+        }
+        return nc;
+      });
+      setNonConformitiesConfigs(updatedNCConfigs);
+      localStorage.setItem('lotes_non_conformities_configs', JSON.stringify(updatedNCConfigs));
+      return;
+    }
+    
+    try {
+      await deleteDoc(doc(db, 'framings', id));
+      
+      // Also clear fields in matched docs
+      const matching = nonConformitiesConfigs.filter((nc: any) => nc.framingId === id);
+      for (const m of matching) {
+        await updateDoc(doc(db, 'non_conformities_configs', m.id), {
+          framingId: '',
+          framingNumber: '',
+          framingDescription: ''
+        });
+      }
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `framings/${id}`);
     }
   };
 
@@ -3457,86 +3708,324 @@ function ConfigPanel({
               Adicione, edite ou exclua opções de preenchimento para as telas de recebimento de lotes.
             </p>
           </div>
-          <div className="flex gap-2 mb-6">
-            <input 
-              type="text" 
-              placeholder={
-                activeConfig === 'pacs' ? 'Novo PAC...' : 
-                activeConfig === 'collabs' ? 'Novo Colaborador...' : 
-                activeConfig === 'status' ? 'Novo Status...' : 
-                activeConfig === 'notification_types' ? 'Novo Tipo de Notificação...' :
-                'Novo Motivo de Não-Conformidade...'
-              }
-              className="flex-1 p-3 bg-[#f5f5f0] border-none rounded-xl focus:ring-2 focus:ring-[#5A5A40]/20"
-              value={newItemName}
-              onChange={e => setNewItemName(e.target.value)}
-            />
-            <button 
-              onClick={handleAdd}
-              className="bg-[#5A5A40] text-white px-6 rounded-xl font-bold hover:bg-[#4a4a30]"
-            >
-              Adicionar
-            </button>
-          </div>
 
-      <div className="space-y-2">
-        {items.map((item: any) => (
-          <div key={item.id} className="flex items-center justify-between p-4 bg-[#f5f5f0] rounded-xl group">
-            {editingId === item.id ? (
-              <div className="flex flex-1 gap-2">
+          {activeConfig === 'non_conformities' ? (
+            <div className="flex flex-col md:flex-row gap-3 mb-6 bg-[#f5f5f0]/40 p-4 rounded-2xl border border-[#e5e5e0]">
+              <div className="flex-1 space-y-1">
+                <label className="text-[10px] font-bold uppercase text-[#5A5A40] block">Descrição do Motivo de Não-Conformidade</label>
                 <input 
-                  type="text"
-                  className="flex-1 px-3 py-1 bg-white border border-[#e5e5e0] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#5A5A40]/20"
-                  value={editingValue}
-                  onChange={(e) => setEditingValue(e.target.value)}
-                  autoFocus
+                  type="text" 
+                  placeholder="Novo Motivo de Não-Conformidade..."
+                  className="w-full p-2.5 bg-white border border-[#e5e5e0] rounded-xl text-xs focus:ring-2 focus:ring-[#5A5A40]/20 font-medium"
+                  value={newItemName}
+                  onChange={e => setNewItemName(e.target.value)}
                 />
-                <button 
-                  onClick={handleSaveEdit}
-                  className="p-1 text-emerald-600 hover:bg-emerald-50 rounded-lg"
+              </div>
+              <div className="w-full md:w-80 space-y-1">
+                <label className="text-[10px] font-bold uppercase text-[#5A5A40] block">Enquadramento Vinculado</label>
+                <select
+                  className="w-full p-2.5 bg-white border border-[#e5e5e0] rounded-xl text-xs focus:ring-2 focus:ring-[#5A5A40]/20 font-semibold text-gray-700 h-[42px]"
+                  value={selectedFramingId}
+                  onChange={e => setSelectedFramingId(e.target.value)}
                 >
-                  <Check size={18} />
-                </button>
+                  <option value="">-- Sem Enquadramento --</option>
+                  {(framings || []).map((f: any) => (
+                    <option key={f.id} value={f.id}>
+                      N° {f.number} - {f.description.length > 50 ? f.description.substring(0, 50) + '...' : f.description}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex items-end">
                 <button 
-                  onClick={() => setEditingId(null)}
-                  className="p-1 text-red-600 hover:bg-red-50 rounded-lg"
+                  onClick={handleAdd}
+                  className="w-full md:w-auto bg-[#5A5A40] text-white px-6 py-2.5 rounded-xl font-bold text-xs hover:bg-[#4a4a30] transition-colors h-[42px]"
                 >
-                  <X size={18} />
+                  Adicionar
                 </button>
               </div>
-            ) : (
-              <>
-                <span className="font-medium">{item.name}</span>
-                <div className="flex gap-1">
-                  {activeConfig === 'notification_types' && (
-                    <button 
-                      onClick={() => handleCopyNotificationType(item)}
-                      className="p-2 text-[#5A5A40] hover:bg-white rounded-lg transition-all mr-1"
-                      title="Copiar Modelo de Notificação"
-                    >
-                      <Copy size={16} />
-                    </button>
-                  )}
-                  <button 
-                    onClick={() => handleEdit(item.id, item.name)}
-                    className="p-2 text-[#5A5A40] hover:bg-white rounded-lg transition-colors"
+            </div>
+          ) : (
+            <div className="flex gap-2 mb-6">
+              <input 
+                type="text" 
+                placeholder={
+                  activeConfig === 'pacs' ? 'Novo PAC...' : 
+                  activeConfig === 'collabs' ? 'Novo Colaborador...' : 
+                  activeConfig === 'status' ? 'Novo Status...' : 
+                  activeConfig === 'notification_types' ? 'Novo Tipo de Notificação...' :
+                  'Novo Motivo de Não-Conformidade...'
+                }
+                className="flex-1 p-3 bg-[#f5f5f0] border-none rounded-xl focus:ring-2 focus:ring-[#5A5A40]/20 text-sm"
+                value={newItemName}
+                onChange={e => setNewItemName(e.target.value)}
+              />
+              <button 
+                onClick={handleAdd}
+                className="bg-[#5A5A40] text-white px-6 rounded-xl font-bold hover:bg-[#4a4a30]"
+              >
+                Adicionar
+              </button>
+            </div>
+          )}
+
+          <div className="space-y-2">
+            {items.map((item: any) => (
+              <div key={item.id} className="flex items-center justify-between p-4 bg-[#f5f5f0] rounded-xl group">
+                {editingId === item.id ? (
+                  <div className="flex flex-col md:flex-row flex-1 gap-3 bg-white p-3 rounded-lg border border-[#e5e5e0]">
+                    <div className="flex-1">
+                      <label className="text-[9px] font-bold uppercase text-gray-400 block mb-1">Descrição</label>
+                      <input 
+                        type="text"
+                        className="w-full px-3 py-1.5 bg-white border border-[#e5e5e0] rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-[#5A5A40]/20 font-medium"
+                        value={editingValue}
+                        onChange={(e) => setEditingValue(e.target.value)}
+                        autoFocus
+                      />
+                    </div>
+                    {activeConfig === 'non_conformities' && (
+                      <div className="w-full md:w-60">
+                        <label className="text-[9px] font-bold uppercase text-gray-400 block mb-1">Enquadramento Vinculado</label>
+                        <select
+                          className="w-full px-3 py-1.5 bg-white border border-[#e5e5e0] rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-[#5A5A40]/20 font-semibold text-gray-700"
+                          value={editingConfigFramingId}
+                          onChange={e => setEditingConfigFramingId(e.target.value)}
+                        >
+                          <option value="">-- Sem Enquadramento --</option>
+                          {(framings || []).map((f: any) => (
+                            <option key={f.id} value={f.id}>
+                              N° {f.number} - {f.description.length > 30 ? f.description.substring(0, 30) + '...' : f.description}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                    <div className="flex gap-2 items-end justify-end">
+                      <button 
+                        onClick={handleSaveEdit}
+                        className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg"
+                        title="Salvar"
+                      >
+                        <Check size={18} />
+                      </button>
+                      <button 
+                        onClick={() => {
+                          setEditingId(null);
+                          setEditingConfigFramingId('');
+                        }}
+                        className="p-1.5 text-red-650 hover:bg-red-50 rounded-lg"
+                        title="Cancelar"
+                      >
+                        <X size={18} />
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex-1 pr-4">
+                      <span className="font-semibold text-gray-800 text-sm block">{item.name}</span>
+                      {activeConfig === 'non_conformities' && (
+                        <div className="mt-1 text-xs text-[#5A5A40]/70 flex flex-wrap gap-2 items-center">
+                          {item.framingNumber ? (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-[#5A5A40]/10 text-[#5A5A40] font-mono text-[10px] font-bold">
+                              Enquadramento: N° {item.framingNumber} - {item.framingDescription}
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-gray-400 italic">-- Nenhum enquadramento vinculado --</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex gap-1">
+                      {activeConfig === 'notification_types' && (
+                        <button 
+                          onClick={() => handleCopyNotificationType(item)}
+                          className="p-2 text-[#5A5A40] hover:bg-white rounded-lg transition-all mr-1"
+                          title="Copiar Modelo de Notificação"
+                        >
+                          <Copy size={16} />
+                        </button>
+                      )}
+                      <button 
+                        onClick={() => handleEdit(item)}
+                        className="p-2 text-[#5A5A40] hover:bg-white rounded-lg transition-colors"
+                        title="Editar"
+                      >
+                        <Edit3 size={18} />
+                      </button>
+                      <button 
+                        onClick={() => handleDelete(item.id)}
+                        className="p-2 text-red-500 hover:bg-white rounded-lg transition-colors"
+                        title="Excluir"
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {activeConfig === 'non_conformities' && (
+            <div className="mt-12 pt-8 border-t border-[#e5e5e0] space-y-6">
+              <div>
+                <h4 className="font-display font-bold text-lg text-[#5A5A40] tracking-tight">
+                  Gerenciar enquadramentos
+                </h4>
+                <p className="text-xs text-[#5A5A40]/60 mt-0.5">
+                  Associe leis, normas ou portarias de enquadramento legal aos motivos de não-conformidade.
+                </p>
+              </div>
+
+              {/* Form to add framing */}
+              <div className="bg-[#f5f5f0]/40 p-4 rounded-2xl border border-[#e5e5e0] flex flex-col md:flex-row gap-3">
+                <div className="w-full md:w-1/3 space-y-1 font-sans">
+                  <label className="text-[10px] font-bold uppercase text-[#5A5A40] block">N° do Enquadramento</label>
+                  <input
+                    type="text"
+                    placeholder="Ex: Art. 10..."
+                    className="w-full p-2.5 bg-white border border-[#e5e5e0] rounded-xl text-xs focus:ring-2 focus:ring-[#5A5A40]/20 font-medium"
+                    value={newFramingNumber}
+                    onChange={(e) => setNewFramingNumber(e.target.value)}
+                  />
+                </div>
+                <div className="flex-1 space-y-1">
+                  <label className="text-[10px] font-bold uppercase text-[#5A5A40] block">Descrição do Enquadramento</label>
+                  <input
+                    type="text"
+                    placeholder="Ex: Inobservância do padrão regulamentar..."
+                    className="w-full p-2.5 bg-white border border-[#e5e5e0] rounded-xl text-xs focus:ring-2 focus:ring-[#5A5A40]/20 font-medium"
+                    value={newFramingDescription}
+                    onChange={(e) => setNewFramingDescription(e.target.value)}
+                  />
+                </div>
+                <div className="flex items-end">
+                  <button
+                    onClick={handleAddFraming}
+                    className="w-full md:w-auto bg-[#5A5A40] text-white px-5 py-2.5 rounded-xl font-bold text-xs hover:bg-[#4a4a30] transition-colors h-[42px]"
                   >
-                    <Edit3 size={18} />
-                  </button>
-                  <button 
-                    onClick={() => handleDelete(item.id)}
-                    className="p-2 text-red-500 hover:bg-white rounded-lg transition-colors"
-                  >
-                    <Trash2 size={18} />
+                    Salvar Enquadramento
                   </button>
                 </div>
-              </>
-            )}
-          </div>
-        ))}
-      </div>
-    </>
-  )}
+              </div>
+
+              {/* Search query */}
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  placeholder="🔍 Buscar enquadramento por número..."
+                  className="w-full md:w-80 p-2 py-1.5 bg-[#f5f5f0] border border-transparent rounded-xl text-xs focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#5A5A40]/10"
+                  value={framingSearch}
+                  onChange={(e) => setFramingSearch(e.target.value)}
+                />
+                {framingSearch && (
+                  <button
+                    onClick={() => setFramingSearch('')}
+                    className="text-xs text-red-500 hover:underline font-bold"
+                  >
+                    Limpar
+                  </button>
+                )}
+              </div>
+
+              {/* Framings list */}
+              <div className="space-y-2">
+                {(framings || []).filter((f: any) => {
+                  if (!framingSearch.trim()) return true;
+                  const query = framingSearch.toLowerCase().trim();
+                  return (f.number || '').toLowerCase().includes(query) || (f.description || '').toLowerCase().includes(query);
+                }).length > 0 ? (
+                  (framings || []).filter((f: any) => {
+                    if (!framingSearch.trim()) return true;
+                    const query = framingSearch.toLowerCase().trim();
+                    return (f.number || '').toLowerCase().includes(query) || (f.description || '').toLowerCase().includes(query);
+                  }).map((f: any) => (
+                    <div key={f.id} className="flex items-center justify-between p-3.5 bg-[#f5f5f0]/50 rounded-xl border border-transparent hover:border-[#e5e5e0] transition-all group">
+                      {editingFramingId === f.id ? (
+                        <div className="flex flex-col md:flex-row flex-1 gap-3 bg-white p-3 rounded-lg border border-[#e5e5e0]">
+                          <div className="w-full md:w-1/3">
+                            <label className="text-[9px] font-bold uppercase text-gray-400 block mb-1">N°</label>
+                            <input
+                              type="text"
+                              className="w-full px-3 py-1.5 bg-white border border-[#e5e5e0] rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-[#5A5A40]/20 font-semibold"
+                              value={editingFramingNumber}
+                              onChange={(e) => setEditingFramingNumber(e.target.value)}
+                            />
+                          </div>
+                          <div className="flex-1">
+                            <label className="text-[9px] font-bold uppercase text-gray-400 block mb-1">Descrição</label>
+                            <input
+                              type="text"
+                              className="w-full px-3 py-1.5 bg-white border border-[#e5e5e0] rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-[#5A5A40]/20 font-medium"
+                              value={editingFramingDescription}
+                              onChange={(e) => setEditingFramingDescription(e.target.value)}
+                            />
+                          </div>
+                          <div className="flex gap-2 items-end justify-end">
+                            <button
+                              onClick={handleSaveEditFraming}
+                              className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg"
+                              title="Salvar"
+                            >
+                              <Check size={16} />
+                            </button>
+                            <button
+                              onClick={() => {
+                                setEditingFramingId(null);
+                                setEditingFramingNumber('');
+                                setEditingFramingDescription('');
+                              }}
+                              className="p-1.5 text-red-650 hover:bg-red-50 rounded-lg"
+                              title="Cancelar"
+                            >
+                              <X size={16} />
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="flex-1 pr-4">
+                            <div className="flex items-center gap-2">
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-[#5A5A40]/10 text-[#5A5A40] font-mono text-[10px] font-bold">
+                                N° {f.number}
+                              </span>
+                              <span className="text-xs text-gray-800 font-medium">{f.description}</span>
+                            </div>
+                          </div>
+                          <div className="flex gap-1">
+                            <button
+                              onClick={() => handleStartEditFraming(f)}
+                              className="p-2 text-[#5A5A40] hover:bg-white rounded-lg transition-colors"
+                              title="Editar Enquadramento"
+                            >
+                              <Edit3 size={15} />
+                            </button>
+                            <button
+                              onClick={() => {
+                                if (confirm(`Deseja realmente excluir o enquadramento N° ${f.number}? Motivos de não-conformidade vinculados a ele perderão o vínculo.`)) {
+                                  handleDeleteFraming(f.id);
+                                }
+                              }}
+                              className="p-2 text-red-500 hover:bg-white rounded-lg transition-colors"
+                              title="Excluir Enquadramento"
+                            >
+                              <Trash2 size={15} />
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-xs text-gray-400 italic bg-gray-50 p-4 rounded-xl border border-dashed border-gray-150 text-center">Nenhum enquadramento correspondente aos termos de busca.</p>
+                )}
+              </div>
+            </div>
+          )}
+        </>
+      )}
 
   {activeConfig === 'notification_types' && (
     <div className="mt-10 pt-10 border-t border-gray-200">

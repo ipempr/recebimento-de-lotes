@@ -21,7 +21,8 @@ import {
   Menu,
   Sparkles,
   RefreshCw,
-  Printer
+  Printer,
+  Settings
 } from 'lucide-react';
 import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -103,45 +104,144 @@ export default function NotificationTemplatesManager({
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [copiedText, setCopiedText] = useState(false);
 
-  // Load selected template values
+  // Notification Rules edit states
+  const [ruleActive, setRuleActive] = useState(false);
+  const [validadeMeses, setValidadeMeses] = useState(6);
+  const [criterioAActive, setCriterioAActive] = useState(false);
+  const [criterioANcId, setCriterioANcId] = useState('');
+  const [criterioALimite, setCriterioALimite] = useState(10);
+  const [criterioBActive, setCriterioBActive] = useState(false);
+  const [criterioBNcId, setCriterioBNcId] = useState('');
+  const [criterioBLimite, setCriterioBLimite] = useState(15);
+  const [operadorLogico, setOperadorLogico] = useState<'E' | 'OU'>('OU');
+  const [limiteNotificacoes, setLimiteNotificacoes] = useState(2);
+  const [proximoNivelTypeId, setProximoNivelTypeId] = useState('');
+  const [isSavingRule, setIsSavingRule] = useState(false);
+  const [saveRuleSuccess, setSaveRuleSuccess] = useState(false);
+
+  // Load selected template values and rule values
   useEffect(() => {
     if (selectedTypeId) {
       const selectedType = notificationTypes.find(t => t.id === selectedTypeId);
-      if (selectedType && selectedType.templates) {
-        const t = selectedType.templates;
-        if (t.oficio) {
-          setOficioTitle(t.oficio.title || 'NOTIFICAÇÃO DE AUTUAÇÃO');
-          setOficioProcessHeader(t.oficio.processHeader || 'Processo IPEM-PR 52603.000007/2026-31\nde 02 de julho de 2026.');
-          setOficioIntro(t.oficio.intro || '');
-          setOficioSections(t.oficio.sections || []);
-          setOficioSignatureId(t.oficio.signatureId || '');
+      if (selectedType) {
+        // Load templates
+        if (selectedType.templates) {
+          const t = selectedType.templates;
+          if (t.oficio) {
+            setOficioTitle(t.oficio.title || 'NOTIFICAÇÃO DE AUTUAÇÃO');
+            setOficioProcessHeader(t.oficio.processHeader || 'Processo IPEM-PR 52603.000007/2026-31\nde 02 de julho de 2026.');
+            setOficioIntro(t.oficio.intro || '');
+            setOficioSections(t.oficio.sections || []);
+            setOficioSignatureId(t.oficio.signatureId || '');
+          } else {
+            resetTemplatesToDefault();
+          }
+          if (t.email) {
+            setEmailSubject(t.email.subject || '');
+            setEmailBody(t.email.body || '');
+          }
+          if (t.whatsapp) {
+            setWhatsappTemplate(t.whatsapp.template || '');
+          }
+        } else {
+          resetTemplatesToDefault();
         }
-        if (t.email) {
-          setEmailSubject(t.email.subject || '');
-          setEmailBody(t.email.body || '');
+
+        // Load rules
+        if (selectedType.rule) {
+          const r = selectedType.rule;
+          setRuleActive(r.active ?? false);
+          setValidadeMeses(r.validadeMeses ?? 6);
+          setCriterioAActive(r.criterioA_ativo ?? false);
+          setCriterioANcId(r.criterioA_ncId ?? '');
+          setCriterioALimite(r.criterioA_limite ?? 10);
+          setCriterioBActive(r.criterioB_ativo ?? false);
+          setCriterioBNcId(r.criterioB_ncId ?? '');
+          setCriterioBLimite(r.criterioB_limite ?? 15);
+          setOperadorLogico(r.operadorLogico ?? 'OU');
+          setLimiteNotificacoes(r.limiteNotificacoes ?? 2);
+          setProximoNivelTypeId(r.proximoNivel_typeId ?? '');
+        } else {
+          resetRulesToDefault();
         }
-        if (t.whatsapp) {
-          setWhatsappTemplate(t.whatsapp.template || '');
-        }
-      } else {
-        // Fallback to default templates
-        setOficioTitle('NOTIFICAÇÃO DE AUTUAÇÃO');
-        setOficioProcessHeader('Processo IPEM-PR 52603.000007/2026-31\nde 02 de julho de 2026.');
-        setOficioIntro('O Instituto de Pesos e Medidas do Paraná - IPEM-PR abriu um processo administrativo contra:');
-        setOficioSections([
-          { id: '1', icon: 'search', title: 'MOTIVO', content: 'Identificamos a(s) irregularidade(s) descrita(s) no auto de infração em anexo.\nNúmero do Auto de Infração: 3218663\n\nNo lote analisado, composto de {total_ensaios} ensaios, identificamos {erros_encontrados} desvios, o que corresponde a um percentual de irregularidade de {percentual_erro}%.\n\nRelação de placas com não-conformidades encontradas:\n{placas_nao_conformes}' },
-          { id: '2', icon: 'check-square', title: 'COMO SE DEFENDER?', content: 'Você poderá apresentar a defesa por escrito em até 10(dez) dias, contados da data de recebimento desta notificação. Na defesa, informe:\n\n1. Nome do órgão que o notificou: IPEM-PR;\n2. Nome, CPF/CNPJ e assinatura;\n3. Número do Processo e do(s) Auto(s) de Infração;\n4. Motivo da defesa detalhado.' },
-          { id: '3', icon: 'alert-triangle', title: 'IMPORTANTE', content: 'Você deve enviar uma cópia do seu documento de identificação oficial junto com a defesa. E se você estiver representado por procurador legal, não esqueça de encaminhar a procuração.' },
-          { id: '4', icon: 'send', title: 'PARA ONDE ENVIAR?', content: 'Envie sua defesa para o IPEM-PR, localizado em Curitiba, na Rua Estados Unidos, 1354, bairro Bacacheri, CEP 82510-050.' },
-          { id: '5', icon: 'help-circle', title: 'DÚVIDAS?', content: 'Envie e-mail para ouvidoria@ipem.pr.gov.br ou entre em contato pelo telefone (41) 3251-2200.' }
-        ]);
-        setEmailSubject('Notificação Urgente de Irregularidade - PAC {pac_nome}');
-        setEmailBody('Prezados,\n\nConstatamos não-conformidades técnicas nos lotes do PAC {pac_nome}.\n\n{motivo_detalhes}\n\nReiteramos que o percentual de falhas detectadas foi de {percentual_erro}%. Verifique as instruções abaixo para apresentar a defesa prévia em até 10 dias corridos.\n\nAtenciosamente,\nIPEM-PR.');
-        setWhatsappTemplate('⚠️ *NOTIFICAÇÃO DE AUTUAÇÃO - IPEM-PR*\n\nInformamos que foi aberto o processo administrativo para o *PAC {pac_nome}* devido a desvios encontrados nos ensaios.\n\n*Índice de Irregularidades:* {percentual_erro}% ({erros_encontrados} falhas de {total_ensaios} ensaios).\n\n📄 *Placas Não-Conformes:* \n{placas_nao_conformes}\n\n⚖️ *Como se defender?*\nVocê possui até 10 dias úteis para apresentar recurso formalizado por escrito para o IPEM-PR, contendo justificativas, documento de identificação e procuração (caso aplicável).\n\nDúvidas: ouvidoria@ipem.pr.gov.br ou (41) 3251-2200.');
-        setOficioSignatureId('');
       }
     }
   }, [selectedTypeId, notificationTypes]);
+
+  const resetTemplatesToDefault = () => {
+    setOficioTitle('NOTIFICAÇÃO DE AUTUAÇÃO');
+    setOficioProcessHeader('Processo IPEM-PR 52603.000007/2026-31\nde 02 de julho de 2026.');
+    setOficioIntro('O Instituto de Pesos e Medidas do Paraná - IPEM-PR abriu um processo administrativo contra:');
+    setOficioSections([
+      { id: '1', icon: 'search', title: 'MOTIVO', content: 'Identificamos a(s) irregularidade(s) descrita(s) no auto de infração em anexo.\nNúmero do Auto de Infração: 3218663\n\nNo lote analisado, composto de {total_ensaios} ensaios, identificamos {erros_encontrados} desvios, o que corresponde a um percentual de irregularidade de {percentual_erro}%.\n\nRelação de placas com não-conformidades encontradas:\n{placas_nao_conformes}' },
+      { id: '2', icon: 'check-square', title: 'COMO SE DEFENDER?', content: 'Você poderá apresentar a defesa por escrito em até 10(dez) dias, contados da data de recebimento desta notificação. Na defesa, informe:\n\n1. Nome do órgão que o notificou: IPEM-PR;\n2. Nome, CPF/CNPJ e assinatura;\n3. Número do Processo e do(s) Auto(s) de Infração;\n4. Motivo da defesa detalhado.' },
+      { id: '3', icon: 'alert-triangle', title: 'IMPORTANTE', content: 'Você deve enviar uma cópia do seu documento de identificação oficial junto com a defesa. E se você estiver representado por procurador legal, não esqueça de encaminhar a procuração.' },
+      { id: '4', icon: 'send', title: 'PARA ONDE ENVIAR?', content: 'Envie sua defesa para o IPEM-PR, localizado em Curitiba, na Rua Estados Unidos, 1354, bairro Bacacheri, CEP 82510-050.' },
+      { id: '5', icon: 'help-circle', title: 'DÚVIDAS?', content: 'Envie e-mail para ouvidoria@ipem.pr.gov.br ou entre em contato pelo telefone (41) 3251-2200.' }
+    ]);
+    setEmailSubject('Notificação Urgente de Irregularidade - PAC {pac_nome}');
+    setEmailBody('Prezados,\n\nConstatamos não-conformidades técnicas nos lotes do PAC {pac_nome}.\n\n{motivo_detalhes}\n\nReiteramos que o percentual de falhas detectadas foi de {percentual_erro}%. Verifique as instruções abaixo para apresentar a defesa prévia em até 10 dias corridos.\n\nAtenciosamente,\nIPEM-PR.');
+    setWhatsappTemplate('⚠️ *NOTIFICAÇÃO DE AUTUAÇÃO - IPEM-PR*\n\nInformamos que foi aberto o processo administrativo para o *PAC {pac_nome}* devido a desvios encontrados nos ensaios.\n\n*Índice de Irregularidades:* {percentual_erro}% ({erros_encontrados} falhas de {total_ensaios} ensaios).\n\n📄 *Placas Não-Conformes:* \n{placas_nao_conformes}\n\n⚖️ *Como se defender?*\nVocê possui até 10 dias úteis para apresentar recurso formalizado por escrito para o IPEM-PR, contendo justificativas, documento de identificação e procuração (caso aplicável).\n\nDúvidas: ouvidoria@ipem.pr.gov.br ou (41) 3251-2200.');
+    setOficioSignatureId('');
+  };
+
+  const resetRulesToDefault = () => {
+    setRuleActive(false);
+    setValidadeMeses(6);
+    setCriterioAActive(false);
+    setCriterioANcId('');
+    setCriterioALimite(10);
+    setCriterioBActive(false);
+    setCriterioBNcId('');
+    setCriterioBLimite(15);
+    setOperadorLogico('OU');
+    setLimiteNotificacoes(2);
+    setProximoNivelTypeId('');
+  };
+
+  // Handle saving the edited rules properties
+  const handleSaveRule = async () => {
+    if (!selectedTypeId) return;
+    setIsSavingRule(true);
+    setSaveRuleSuccess(false);
+
+    const rule = {
+      active: ruleActive,
+      validadeMeses: Number(validadeMeses),
+      criterioA_ativo: criterioAActive,
+      criterioA_ncId: criterioANcId,
+      criterioA_limite: Number(criterioALimite),
+      criterioB_ativo: criterioBActive,
+      criterioB_ncId: criterioBNcId,
+      criterioB_limite: Number(criterioBLimite),
+      operadorLogico,
+      limiteNotificacoes: Number(limiteNotificacoes),
+      proximoNivel_typeId: proximoNivelTypeId
+    };
+
+    try {
+      if (isLocalMode) {
+        const updated = notificationTypes.map(t => {
+          if (t.id === selectedTypeId) {
+            return { ...t, rule };
+          }
+          return t;
+        });
+        setNotificationTypes(updated);
+        localStorage.setItem('lotes_notification_types', JSON.stringify(updated));
+      } else {
+        await updateDoc(doc(db, 'notification_types', selectedTypeId), { rule });
+        const updated = notificationTypes.map(t => t.id === selectedTypeId ? { ...t, rule } : t);
+        setNotificationTypes(updated);
+      }
+      setSaveRuleSuccess(true);
+      setTimeout(() => setSaveRuleSuccess(false), 3000);
+    } catch (e: any) {
+      handleFirestoreError(e, 'update', `notification_types/${selectedTypeId}`);
+    } finally {
+      setIsSavingRule(false);
+    }
+  };
 
   // Handle saving the edited templates properties
   const handleSaveTemplates = async () => {
@@ -380,12 +480,17 @@ export default function NotificationTemplatesManager({
               body { 
                 margin: 1.5cm 2cm; 
                 -webkit-print-color-adjust: exact; 
-                print-color-adjust: exact; 
+                print-color-adjust: exact;
+                display: block !important;
               }
-              .no-print { display: none; }
-              .print-avoid-break { 
+              .no-print { display: none !important; }
+              .print-avoid-break, .target-box, .section-item { 
                 page-break-inside: avoid !important; 
-                break-inside: avoid !important; 
+                break-inside: avoid !important;
+              }
+              .header {
+                page-break-inside: avoid !important;
+                break-inside: avoid !important;
               }
             }
             body { 
@@ -972,6 +1077,260 @@ export default function NotificationTemplatesManager({
 
           </div>
 
+        </div>
+      )}
+
+      {/* Gerenciar Regras de Notificações Section */}
+      {selectedTypeId && (
+        <div id="gerenciar-regras-secao" className="mt-10 pt-10 border-t border-gray-200 space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h3 className="font-display font-bold text-xl text-[#5A5A40] flex items-center gap-2">
+                <Settings size={22} className="text-[#5A5A40]" />
+                Gerenciar Regras de Notificações
+              </h3>
+              <p className="text-xs text-[#5A5A40]/60 mt-0.5">
+                Defina os parâmetros de validade temporal, gatilhos de não-conformidade e regras de escalonamento para <strong>{notificationTypes.find(t => t.id === selectedTypeId)?.name}</strong>.
+              </p>
+            </div>
+            
+            <button
+              type="button"
+              onClick={handleSaveRule}
+              disabled={isSavingRule}
+              className={cn(
+                "px-5 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all shadow-sm shrink-0 self-start sm:self-center",
+                saveRuleSuccess 
+                  ? "bg-emerald-600 text-white hover:bg-emerald-700" 
+                  : "bg-[#5A5A40] text-white hover:bg-[#4a4a30]"
+              )}
+            >
+              {isSavingRule ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
+              {saveRuleSuccess ? "Regra Salva!" : isSavingRule ? "Salvando..." : "Salvar Regra de Autuação"}
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            {/* Status & Validity Card */}
+            <div className="lg:col-span-4 bg-[#f5f5f0]/30 border border-[#e5e5e0] rounded-3xl p-5 space-y-5">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-[#5A5A40] border-b border-[#e5e5e0]/70 pb-2 flex items-center justify-between">
+                <span>1. Cadastro e Validade</span>
+                <span className="text-[10px] lowercase text-[#5A5A40]/40 font-mono">(ciclo de vida)</span>
+              </h4>
+              
+              <div className="space-y-4">
+                <label className="flex items-start gap-3 bg-white p-3.5 rounded-xl border border-[#e5e5e0] cursor-pointer select-none">
+                  <input 
+                    type="checkbox" 
+                    checked={ruleActive}
+                    onChange={e => setRuleActive(e.target.checked)}
+                    className="mt-0.5 w-4 h-4 rounded text-[#5A5A40] border-gray-300 focus:ring-[#5A5A40]/20"
+                  />
+                  <div>
+                    <span className="text-xs font-bold text-gray-800 block">Ativar Regra de Autuação</span>
+                    <span className="text-[10px] text-gray-400 leading-tight block mt-0.5">Habilita a execução das validações pelo motor de autuação para este tipo</span>
+                  </div>
+                </label>
+                
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold uppercase text-[#5A5A40]/70">Janela de Validade (Meses)</label>
+                  <div className="relative">
+                    <input 
+                      type="number" 
+                      min="1" 
+                      max="120"
+                      value={validadeMeses}
+                      onChange={e => setValidadeMeses(Number(e.target.value))}
+                      className="w-full p-3 bg-white border border-[#e5e5e0] rounded-xl text-xs font-mono font-bold text-gray-800 focus:ring-2 focus:ring-[#5A5A40]/20"
+                    />
+                    <span className="absolute right-3 top-3.5 text-[10px] uppercase font-bold text-gray-400">Meses</span>
+                  </div>
+                  <p className="text-[10px] text-gray-400 italic leading-snug">
+                    Janela temporal para validade dos lotes de ensaio (parâmetro X). Lotes cuja data de encerramento ultrapassar este prazo em relação à data atual são automaticamente desconsiderados nas consultas e cálculos.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Trigger Criteria Card */}
+            <div className="lg:col-span-8 bg-[#f5f5f0]/30 border border-[#e5e5e0] rounded-3xl p-5 space-y-5">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-[#5A5A40] border-b border-[#e5e5e0]/70 pb-2">
+                2. Critérios de Gatilho (Análise de Não-Conformidades)
+              </h4>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Criterion A */}
+                <div className="bg-white p-4 rounded-2xl border border-[#e5e5e0] space-y-3">
+                  <label className="flex items-center gap-2 cursor-pointer select-none border-b border-gray-100 pb-2 mb-2">
+                    <input 
+                      type="checkbox" 
+                      checked={criterioAActive}
+                      onChange={e => setCriterioAActive(e.target.checked)}
+                      className="w-4 h-4 rounded text-[#5A5A40] border-gray-300 focus:ring-[#5A5A40]/20"
+                    />
+                    <span className="text-xs font-bold text-[#5A5A40]">Critério A (Lote Atual)</span>
+                  </label>
+
+                  <div className={cn("space-y-3 transition-opacity", !criterioAActive && "opacity-50")}>
+                    <div className="space-y-1">
+                      <label className="text-[9px] font-bold uppercase text-gray-400">Código de Não-Conformidade</label>
+                      <select 
+                        disabled={!criterioAActive}
+                        value={criterioANcId}
+                        onChange={e => setCriterioANcId(e.target.value)}
+                        className="w-full p-2 bg-gray-50 border border-gray-200 rounded-lg text-xs"
+                      >
+                        <option value="">Qualquer Não-Conformidade (Geral)</option>
+                        {nonConformitiesConfigs.map(c => (
+                          <option key={c.id} value={c.id}>{c.name}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[9px] font-bold uppercase text-gray-400">Limite Mínimo de Erro (%)</label>
+                      <div className="relative">
+                        <input 
+                          type="number" 
+                          step="0.01"
+                          min="0"
+                          max="100"
+                          disabled={!criterioAActive}
+                          value={criterioALimite}
+                          onChange={e => setCriterioALimite(Number(e.target.value))}
+                          className="w-full p-2 bg-gray-50 border border-gray-200 rounded-lg text-xs font-mono font-bold"
+                        />
+                        <span className="absolute right-3 top-2 text-xs text-gray-400">%</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Criterion B */}
+                <div className="bg-white p-4 rounded-2xl border border-[#e5e5e0] space-y-3">
+                  <label className="flex items-center gap-2 cursor-pointer select-none border-b border-gray-100 pb-2 mb-2">
+                    <input 
+                      type="checkbox" 
+                      checked={criterioBActive}
+                      onChange={e => setCriterioBActive(e.target.checked)}
+                      className="w-4 h-4 rounded text-[#5A5A40] border-gray-300 focus:ring-[#5A5A40]/20"
+                    />
+                    <span className="text-xs font-bold text-[#5A5A40]">Critério B (Histórico Soma)</span>
+                  </label>
+
+                  <div className={cn("space-y-3 transition-opacity", !criterioBActive && "opacity-50")}>
+                    <div className="space-y-1">
+                      <label className="text-[9px] font-bold uppercase text-gray-400">Não-Conformidade Consolidada</label>
+                      <select 
+                        disabled={!criterioBActive}
+                        value={criterioBNcId}
+                        onChange={e => setCriterioBNcId(e.target.value)}
+                        className="w-full p-2 bg-gray-50 border border-gray-200 rounded-lg text-xs"
+                      >
+                        <option value="">Qualquer Não-Conformidade (Erros Gerais)</option>
+                        {nonConformitiesConfigs.map(c => (
+                          <option key={c.id} value={c.id}>{c.name}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[9px] font-bold uppercase text-gray-400">Limite Mínimo Consolidado (%)</label>
+                      <div className="relative">
+                        <input 
+                          type="number" 
+                          step="0.01"
+                          min="0"
+                          max="100"
+                          disabled={!criterioBActive}
+                          value={criterioBLimite}
+                          onChange={e => setCriterioBLimite(Number(e.target.value))}
+                          className="w-full p-2 bg-gray-50 border border-gray-200 rounded-lg text-xs font-mono font-bold"
+                        />
+                        <span className="absolute right-3 top-2 text-xs text-gray-400">%</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Logical Operator */}
+              {criterioAActive && criterioBActive && (
+                <div className="bg-white p-4 rounded-2xl border border-dashed border-[#e5e5e0] flex flex-col md:flex-row md:items-center justify-between gap-3 animate-in fade-in duration-200">
+                  <div>
+                    <span className="text-xs font-bold text-gray-800 block">Operação Lógica de Combinação</span>
+                    <span className="text-[10px] text-gray-400">Combine as condições A e B para acionamento do gatilho</span>
+                  </div>
+                  <div className="flex bg-[#f5f5f0] p-1 rounded-xl gap-1 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setOperadorLogico('OU')}
+                      className={cn(
+                        "px-4 py-1.5 rounded-lg text-[10px] font-bold tracking-wider transition-all",
+                        operadorLogico === 'OU' ? "bg-[#5A5A40] text-white shadow-xs" : "text-[#5A5A40]/60 hover:text-[#5A5A40]"
+                      )}
+                    >
+                      OU (Qualquer um)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setOperadorLogico('E')}
+                      className={cn(
+                        "px-4 py-1.5 rounded-lg text-[10px] font-bold tracking-wider transition-all",
+                        operadorLogico === 'E' ? "bg-[#5A5A40] text-white shadow-xs" : "text-[#5A5A40]/60 hover:text-[#5A5A40]"
+                      )}
+                    >
+                      E (Ambos)
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Escalation Rule Card */}
+          <div className="bg-[#f5f5f0]/30 border border-[#e5e5e0] rounded-3xl p-5 space-y-4">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-[#5A5A40] border-b border-[#e5e5e0]/70 pb-2">
+              3. Regra de Escalonamento e Limite de Repetição
+            </h4>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <div className="space-y-1.5 bg-white p-4 rounded-2xl border border-[#e5e5e0]">
+                <label className="text-[10px] font-bold uppercase text-[#5A5A40]/70 text-gray-800 font-bold block mb-1">Limite de Repetições do Mesmo Tipo</label>
+                <div className="relative">
+                  <input 
+                    type="number" 
+                    min="1" 
+                    max="50"
+                    value={limiteNotificacoes}
+                    onChange={e => setLimiteNotificacoes(Number(e.target.value))}
+                    className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs font-mono font-bold text-gray-800 focus:ring-2 focus:ring-[#5A5A40]/20"
+                  />
+                  <span className="absolute right-3 top-3 text-[10px] uppercase font-bold text-gray-400">Vezes</span>
+                </div>
+                <p className="text-[10px] text-gray-400 leading-normal mt-1">
+                  Define o parâmetro X limite de repetições. O sistema conta as notificações deste tipo emitidas para o histórico consolidado. Ao atingir o limite, o motor bloqueia a reemissão e redireciona.
+                </p>
+              </div>
+
+              <div className="space-y-1.5 bg-white p-4 rounded-2xl border border-[#e5e5e0]">
+                <label className="text-[10px] font-bold uppercase text-[#5A5A40]/70 text-gray-800 font-bold block mb-1">Próximo Nível (Transição de Escalonamento)</label>
+                <select 
+                  value={proximoNivelTypeId}
+                  onChange={e => setProximoNivelTypeId(e.target.value)}
+                  className="w-full p-2.5 bg-gray-50 border border-gray-205 rounded-xl text-xs font-semibold text-[#5A5A40] focus:ring-2 focus:ring-[#5A5A40]/20"
+                >
+                  <option value="">Nenhum (Nível Máximo)</option>
+                  {notificationTypes.filter(t => t.id !== selectedTypeId).map(t => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-gray-400 leading-normal mt-1">
+                  Selecione a notificação superior na hierarquia. Quando o limite acima for alcançado, o motor buscará esta configuração para sugerir a alternativa automaticamente.
+                </p>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

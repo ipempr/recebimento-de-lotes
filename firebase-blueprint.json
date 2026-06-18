@@ -103,6 +103,16 @@
         "logoUrl": { "type": "string" },
         "signatures": { "type": "array" }
       }
+    },
+    "Framing": {
+      "title": "Framing",
+      "description": "Framing/classification of non-conformities with number and description.",
+      "type": "object",
+      "properties": {
+        "number": { "type": "string" },
+        "description": { "type": "string" }
+      },
+      "required": ["number", "description"]
     }
   },
   "firestore": {
@@ -141,6 +151,10 @@
     "/configs/{configId}": {
       "schema": "Branding",
       "description": "Branding and other configuration documents."
+    },
+    "/framings/{framingId}": {
+      "schema": "Framing",
+      "description": "Collection of framings/classifications."
     }
   }
 }

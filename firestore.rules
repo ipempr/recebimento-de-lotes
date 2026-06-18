@@ -72,5 +72,9 @@ service cloud.firestore {
     match /configs/{configId} {
       allow read, write: if isAuthenticated();
     }
+
+    match /framings/{framingId} {
+      allow read, write: if isAuthenticated();
+    }
   }
 }

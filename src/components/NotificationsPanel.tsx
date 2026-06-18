@@ -24,7 +24,8 @@ import {
   AlertTriangle,
   Send,
   HelpCircle,
-  Phone
+  Phone,
+  Sparkles
 } from 'lucide-react';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -192,12 +193,134 @@ export default function NotificationsPanel({
     return total;
   };
 
-  // Handle Generating notification
-  const handleOpenGenerateModal = (pac: any) => {
+  // Handle Generating notification with optional pre-selected recommended type
+  const handleOpenGenerateModal = (pac: any, suggestedTypeId?: string) => {
     setGeneratingForPac(pac);
-    setSelectedTypeId('');
+    setSelectedTypeId(suggestedTypeId || '');
     setNotificationNotes('');
     setSubmittingError(null);
+  };
+
+  // Rule Evaluator Engine
+  const evaluateRuleForPac = (pac: any, loteAtual: any, ruleType: any): { type: any; isEscalated: boolean; reason: string } | null => {
+    const rule = ruleType.rule;
+    if (!rule || !rule.active) return null;
+
+    const ruleValidadeMeses = rule.validadeMeses || 6;
+    
+    // Check if within X months
+    const isWithinMonths = (dateValue: any, xMonths: number): boolean => {
+      const date = getJsDate(dateValue);
+      if (!date) return false;
+      const now = new Date();
+      const diffMs = now.getTime() - date.getTime();
+      const diffMonths = diffMs / (1000 * 60 * 60 * 24 * 30.4375);
+      return diffMonths <= xMonths;
+    };
+
+    // Filter valid batches within X months
+    const vBatches = pac.batches.filter((vb: any) => isWithinMonths(vb.periodoFinal, ruleValidadeMeses));
+
+    const countPlatesForNc = (batch: any, ncId: string): number => {
+      if (!batch || !batch.nonConformities) return 0;
+      let c = 0;
+      batch.nonConformities.forEach((nc: any) => {
+        if (!ncId || nc.nao_conformidade_id === ncId) {
+          c += (nc.placas || []).length;
+        }
+      });
+      return c;
+    };
+
+    // 2. Critério A: Lote Atual
+    let triggerA = false;
+    let pctA = 0;
+    if (rule.criterioA_ativo && loteAtual) {
+      const countA = countPlatesForNc(loteAtual, rule.criterioA_ncId);
+      const totalA = loteAtual.numEnsaios || 1;
+      pctA = (countA / totalA) * 100;
+      triggerA = pctA >= (rule.criterioA_limite || 0);
+    }
+
+    // 3. Critério B: Soma de Lotes (Histórico)
+    let triggerB = false;
+    let pctB = 0;
+    let sumPlatesB = 0;
+    let sumEnsaiosB = 0;
+    if (rule.criterioB_ativo) {
+      vBatches.forEach((vb: any) => {
+        sumPlatesB += countPlatesForNc(vb, rule.criterioB_ncId);
+        sumEnsaiosB += (vb.numEnsaios || 0);
+      });
+      if (sumEnsaiosB > 0) {
+        pctB = (sumPlatesB / sumEnsaiosB) * 100;
+        triggerB = pctB >= (rule.criterioB_limite || 0);
+      }
+    }
+
+    // 4. Operator logic combination
+    let isTriggered = false;
+    let criteriaReason = '';
+    const ncNameA = rule.criterioA_ncId 
+      ? (nonConformitiesConfigs.find(c => c.id === rule.criterioA_ncId)?.name || 'NC específica') 
+      : 'Qualquer NC';
+    const ncNameB = rule.criterioB_ncId 
+      ? (nonConformitiesConfigs.find(c => c.id === rule.criterioB_ncId)?.name || 'NC específica') 
+      : 'Qualquer NC';
+
+    if (rule.criterioA_ativo && rule.criterioB_ativo) {
+      if (rule.operadorLogico === 'E') {
+        isTriggered = triggerA && triggerB;
+        criteriaReason = `Critério A (${ncNameA}: ${pctA.toFixed(2)}% >= ${rule.criterioA_limite}%) E Critério B (Histórico ${ncNameB}: ${pctB.toFixed(2)}% >= ${rule.criterioB_limite}%) atingidos`;
+      } else {
+        isTriggered = triggerA || triggerB;
+        criteriaReason = triggerA 
+          ? `Critério A atingido (${ncNameA}: ${pctA.toFixed(2)}% >= ${rule.criterioA_limite}%)` 
+          : `Critério B atingido (Histórico ${ncNameB}: ${pctB.toFixed(2)}% >= ${rule.criterioB_limite}%)`;
+      }
+    } else if (rule.criterioA_ativo) {
+      isTriggered = triggerA;
+      criteriaReason = `Critério A atingido (${ncNameA}: ${pctA.toFixed(2)}% >= ${rule.criterioA_limite}%)`;
+    } else if (rule.criterioB_ativo) {
+      isTriggered = triggerB;
+      criteriaReason = `Critério B atingido (Histórico ${ncNameB}: ${pctB.toFixed(2)}% >= ${rule.criterioB_limite}%)`;
+    }
+
+    if (!isTriggered) return null;
+
+    // 5. Escalonamento: Repeat limit check
+    const sameTypeGeneratedCount = generatedNotifications.filter(n => 
+      (n.pac_id === pac.id || n.pac_name === pac.name) && 
+      n.notification_type_id === ruleType.id
+    ).length;
+
+    if (sameTypeGeneratedCount >= (rule.limiteNotificacoes || 2)) {
+      if (rule.proximoNivel_typeId) {
+        const nextType = notificationTypes.find(t => t.id === rule.proximoNivel_typeId);
+        if (nextType) {
+          const nextEval = evaluateRuleForPac(pac, loteAtual, nextType);
+          if (nextEval) {
+            return {
+              type: nextEval.type,
+              isEscalated: true,
+              reason: `Limite de "${ruleType.name}" atingido (${sameTypeGeneratedCount}/${rule.limiteNotificacoes} emitidas). Escalonado para: "${nextEval.type.name}".`
+            };
+          } else {
+            return {
+              type: nextType,
+              isEscalated: true,
+              reason: `Limite de "${ruleType.name}" atingido (${sameTypeGeneratedCount}/${rule.limiteNotificacoes} emitidas). Sugerido próximo nível: "${nextType.name}".`
+            };
+          }
+        }
+      }
+    }
+
+    return {
+      type: ruleType,
+      isEscalated: false,
+      reason: criteriaReason
+    };
   };
 
   const handleCreateNotification = async (e: React.FormEvent) => {
@@ -418,9 +541,21 @@ export default function NotificationsPanel({
           <title>${editableOficioTitle} - ${viewingNotification?.pac_name}</title>
           <style>
             @media print {
-              body { margin: 2.2cm 1.8cm; -webkit-print-color-adjust: exact; padding-bottom: 50px; }
-              .no-print { display: none; }
-              .section-item { page-break-inside: avoid; break-inside: avoid; }
+              body { 
+                margin: 2.2cm 1.8cm; 
+                -webkit-print-color-adjust: exact; 
+                padding-bottom: 50px; 
+                display: block !important;
+              }
+              .no-print { display: none !important; }
+              .section-item, .print-avoid-break, .target-box { 
+                page-break-inside: avoid !important; 
+                break-inside: avoid !important; 
+              }
+              .header {
+                page-break-inside: avoid !important;
+                break-inside: avoid !important;
+              }
               .page-footer {
                 position: fixed;
                 bottom: 0px;
@@ -648,6 +783,31 @@ export default function NotificationsPanel({
           const pacHistory = generatedNotifications.filter(n => n.pac_id === pac.id || n.pac_name === pac.name);
           const activeHistory = expandedPacHistory[pac.id] || false;
 
+          // Find the "lote atual" (latest batch by periodoFinal)
+          const sortedBatches = [...pac.batches].sort((a, b) => {
+            const dateA = getJsDate(a.periodoFinal)?.getTime() || 0;
+            const dateB = getJsDate(b.periodoFinal)?.getTime() || 0;
+            return dateB - dateA;
+          });
+          const loteAtual = sortedBatches[0];
+
+          // Evaluate each active rule to find the best recommendation matching the criteria
+          const getRecommendation = () => {
+            let bestSuggestion: { type: any; isEscalated: boolean; reason: string } | null = null;
+            for (const nType of notificationTypes) {
+              if (nType.rule && nType.rule.active) {
+                const evalResult = evaluateRuleForPac(pac, loteAtual, nType);
+                if (evalResult) {
+                  bestSuggestion = evalResult;
+                  break;
+                }
+              }
+            }
+            return bestSuggestion;
+          };
+
+          const recommendation = getRecommendation();
+
           return (
             <div key={pac.id} className="bg-white rounded-[32px] border border-[#e5e5e0] overflow-hidden flex flex-col h-full shadow-sm hover:shadow-md transition-shadow">
               
@@ -662,17 +822,61 @@ export default function NotificationsPanel({
                   </div>
                 </div>
                 
-                <button
-                  onClick={() => handleOpenGenerateModal(pac)}
-                  className="bg-[#5A5A40] text-white hover:bg-[#4a4a30] transition-colors py-2.5 px-4 rounded-xl text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 shadow-sm"
-                >
-                  <Bell size={14} />
-                  GERAR NOTIFICAÇÃO
-                </button>
+                {recommendation ? (
+                  <button
+                    onClick={() => handleOpenGenerateModal(pac, recommendation.type.id)}
+                    className="bg-amber-600 hover:bg-amber-700 text-white transition-colors py-2.5 px-4 rounded-xl text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 shadow-sm"
+                  >
+                    <Sparkles size={14} />
+                    GERAR RECOMENDADA
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => handleOpenGenerateModal(pac)}
+                    className="bg-[#5A5A40] text-white hover:bg-[#4a4a30] transition-colors py-2.5 px-4 rounded-xl text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 shadow-sm"
+                  >
+                    <Bell size={14} />
+                    GERAR NOTIFICAÇÃO
+                  </button>
+                )}
               </div>
 
               {/* Batches list */}
               <div className="p-6 space-y-4 flex-1">
+                {/* Embedded Recommendation Indicator */}
+                {recommendation && (
+                  <div className="bg-amber-50/50 border border-amber-200/50 p-4 rounded-2xl flex items-start gap-3 mb-4">
+                    <div className="p-2 bg-amber-100 text-amber-700 rounded-xl mt-0.5">
+                      <Sparkles size={16} />
+                    </div>
+                    <div className="flex-1 space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[9px] uppercase tracking-wider font-extrabold text-amber-800">
+                          Recomendação Inteligente de Autuação
+                        </span>
+                        {recommendation.isEscalated && (
+                          <span className="text-[8px] uppercase font-mono font-bold bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded">
+                            Regra De Escalonamento Ativa
+                          </span>
+                        )}
+                      </div>
+                      <h5 className="text-xs font-bold text-gray-900 leading-snug">
+                        Sugerido: <span className="underline decoration-amber-500 font-extrabold">{recommendation.type.name}</span>
+                      </h5>
+                      <p className="text-[10px] text-gray-600 leading-normal">
+                        {recommendation.reason}
+                      </p>
+                      <button
+                        onClick={() => handleOpenGenerateModal(pac, recommendation.type.id)}
+                        className="mt-2 text-[10px] font-semibold text-amber-950 bg-amber-100/80 hover:bg-amber-100 px-3 py-1.5 rounded-lg flex items-center gap-1 transition-colors uppercase tracking-wider border border-amber-200"
+                      >
+                        <Check size={12} />
+                        Aplicar Sugestão & Gerar
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 <p className="text-xs font-bold uppercase text-[#5A5A40]/70 tracking-wider">Lotes Vinculados</p>
                 
                 <div className="space-y-3 max-h-[280px] overflow-y-auto pr-1">
