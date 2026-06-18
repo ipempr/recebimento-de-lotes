@@ -40,6 +40,7 @@ import {
   CheckCircle2, 
   Clock, 
   AlertCircle,
+  AlertTriangle,
   Trash2,
   Edit3,
   X,
@@ -1467,17 +1468,24 @@ function BatchCard({ batch, onEdit, onDelete }: any) {
   return (
     <div className={cn(
       "bg-white rounded-[24px] p-6 border transition-all group",
-      isOverdue ? "border-red-200 bg-red-50/10" : isWarning ? "border-amber-200 bg-amber-50/10" : "border-[#e5e5e0]"
+      isOverdue ? "border-red-200 bg-red-50/10" : 
+      batch.ensaioForaDoPrazo ? "border-amber-300 bg-amber-50/20 shadow-md shadow-amber-500/5 md:border-l-[6px] md:border-l-amber-500" : 
+      isWarning ? "border-amber-200 bg-amber-50/10" : "border-[#e5e5e0]"
     )}>
       <div className="flex flex-col lg:flex-row gap-6">
         {/* Main Info */}
         <div className="flex-1">
           <div className="flex items-start justify-between mb-4">
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               <div>
                 <span className="text-xs font-bold uppercase tracking-wider text-[#5A5A40] opacity-60">PAC</span>
                 <h3 className="text-xl font-display font-bold tracking-tight">{batch.pac}</h3>
               </div>
+              {batch.ensaioForaDoPrazo && (
+                <span className="flex items-center gap-1.5 text-xs font-bold text-amber-800 bg-amber-100 border border-amber-300 px-2.5 py-1 rounded-lg">
+                  <AlertTriangle size={12} className="text-amber-600 animate-pulse" /> ENTREGA IRREGULAR
+                </span>
+              )}
               {isOverdue && (
                 <span className="flex items-center gap-1 text-xs font-bold text-red-600 bg-red-100 px-2 py-1 rounded-lg">
                   <AlertCircle size={12} /> ATRASADO
@@ -1656,6 +1664,7 @@ function BatchModal({ isOpen, onClose, batch, pacs, collaborators, statuses, non
     recebidoPor: batch?.recebidoPor || '',
     lidoPor: batch?.lidoPor || '',
     conferidoPor: batch?.conferidoPor || '',
+    ensaioForaDoPrazo: batch?.ensaioForaDoPrazo || false,
   });
 
   // Non-conformity specific states within BatchModal
@@ -2053,6 +2062,20 @@ function BatchModal({ isOpen, onClose, batch, pacs, collaborators, statuses, non
                   <option value="">-</option>
                   {collaborators.map((c: any) => <option key={c.id} value={c.name}>{c.name}</option>)}
                 </select>
+              </div>
+
+              {/* Checkbox: ensaio entregue fora do prazo */}
+              <div className="col-span-full flex items-center gap-2.5 mt-2 bg-amber-50/40 p-3 rounded-xl border border-dashed border-amber-200">
+                <input 
+                  type="checkbox"
+                  id="ensaioForaDoPrazo"
+                  className="h-4 w-4 rounded border-amber-300 text-amber-605 focus:ring-amber-500/30"
+                  checked={formData.ensaioForaDoPrazo}
+                  onChange={e => setFormData({...formData, ensaioForaDoPrazo: e.target.checked})}
+                />
+                <label htmlFor="ensaioForaDoPrazo" className="text-xs font-bold text-[#5A5A40] cursor-pointer select-none">
+                  ensaio entregue fora do prazo
+                </label>
               </div>
             </div>
           </div>

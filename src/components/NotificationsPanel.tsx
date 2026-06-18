@@ -25,9 +25,11 @@ import {
   Send,
   HelpCircle,
   Phone,
-  Sparkles
+  Sparkles,
+  Eye,
+  BellOff
 } from 'lucide-react';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -96,6 +98,12 @@ export default function NotificationsPanel({
   const [editableEmailBody, setEditableEmailBody] = useState('');
   const [editableWhatsapp, setEditableWhatsapp] = useState('');
 
+  // States for consulting, rectifying, and deleting
+  const [activeSubTab, setActiveSubTab] = useState<'pending' | 'history'>('pending');
+  const [notifSearch, setNotifSearch] = useState('');
+  const [viewingNotificationNotes, setViewingNotificationNotes] = useState('');
+  const [notifToDelete, setNotifToDelete] = useState<string | null>(null);
+
   // Parse any Timestamp or date safely
   const getJsDate = (value: any): Date | null => {
     if (!value) return null;
@@ -143,8 +151,10 @@ export default function NotificationsPanel({
     return { ...batch, nonConformities: ncs };
   });
 
-  // Filter for batches with at least one nonconformity plate
-  const activeNCBatches = batchesWithNCs.filter(b => b.nonConformities && b.nonConformities.length > 0);
+  // Filter for batches with at least one nonconformity plate or marked as delayed (ensaio fora do prazo)
+  const activeNCBatches = batchesWithNCs.filter(b => 
+    (b.nonConformities && b.nonConformities.length > 0) || b.ensaioForaDoPrazo
+  );
 
   // Group PACs with active nonconformity records
   const pacsWithNC = pacs.map(pac => {
@@ -446,23 +456,103 @@ export default function NotificationsPanel({
         .replace(/{data_atual}/g, formatDateShort(item.createdAt || new Date()));
     };
 
-    setEditableOficioTitle(compilePlaceholders(templates.oficio?.title || 'NOTIFICAÇÃO DE AUTUAÇÃO'));
-    setEditableOficioProcess(compilePlaceholders(templates.oficio?.processHeader || 'Processo IMETRO-SC'));
-    setEditableOficioIntro(compilePlaceholders(templates.oficio?.intro || ''));
-    setEditableOficioSections(
-      (templates.oficio?.sections || []).map((s: any) => ({
-        ...s,
-        title: compilePlaceholders(s.title),
-        content: compilePlaceholders(s.content)
-      }))
-    );
+    if (item.customOficioTitle !== undefined) {
+      setEditableOficioTitle(item.customOficioTitle || '');
+      setEditableOficioProcess(item.customOficioProcess || '');
+      setEditableOficioIntro(item.customOficioIntro || '');
+      setEditableOficioSections(item.customOficioSections || []);
+      setEditableEmailSubject(item.customEmailSubject || '');
+      setEditableEmailBody(item.customEmailBody || '');
+      setEditableWhatsapp(item.customWhatsapp || '');
+    } else {
+      setEditableOficioTitle(compilePlaceholders(templates.oficio?.title || 'NOTIFICAÇÃO DE AUTUAÇÃO'));
+      setEditableOficioProcess(compilePlaceholders(templates.oficio?.processHeader || 'Processo IMETRO-SC'));
+      setEditableOficioIntro(compilePlaceholders(templates.oficio?.intro || ''));
+      setEditableOficioSections(
+        (templates.oficio?.sections || []).map((s: any) => ({
+          ...s,
+          title: compilePlaceholders(s.title),
+          content: compilePlaceholders(s.content)
+        }))
+      );
 
-    setEditableEmailSubject(compilePlaceholders(templates.email?.subject || ''));
-    setEditableEmailBody(compilePlaceholders(templates.email?.body || ''));
-    setEditableWhatsapp(compilePlaceholders(templates.whatsapp?.template || ''));
+      setEditableEmailSubject(compilePlaceholders(templates.email?.subject || ''));
+      setEditableEmailBody(compilePlaceholders(templates.email?.body || ''));
+      setEditableWhatsapp(compilePlaceholders(templates.whatsapp?.template || ''));
+    }
 
+    setViewingNotificationNotes(item.notes || '');
     setViewingNotification(item);
     setPreviewChannel('oficio');
+  };
+
+  const handleSaveRectification = async () => {
+    if (!viewingNotification) return;
+
+    setIsSavingNotification(true);
+    try {
+      const updatedItem = {
+        ...viewingNotification,
+        notes: viewingNotificationNotes.trim(),
+        customOficioTitle: editableOficioTitle,
+        customOficioProcess: editableOficioProcess,
+        customOficioIntro: editableOficioIntro,
+        customOficioSections: editableOficioSections,
+        customEmailSubject: editableEmailSubject,
+        customEmailBody: editableEmailBody,
+        customWhatsapp: editableWhatsapp,
+        rectifiedAt: isLocalMode ? new Date().toISOString() : serverTimestamp(),
+        status: 'RETIFICADA'
+      };
+
+      if (isLocalMode) {
+        const updated = generatedNotifications.map(n => n.id === viewingNotification.id ? updatedItem : n);
+        setGeneratedNotifications(updated);
+        localStorage.setItem('lotes_notifications', JSON.stringify(updated));
+      } else {
+        const docRef = doc(db, 'notifications', viewingNotification.id);
+        const { id, ...saveData } = updatedItem;
+        
+        const cleanSaveData = {
+          ...saveData,
+          rectifiedAt: serverTimestamp()
+        };
+        await updateDoc(docRef, cleanSaveData);
+        
+        setGeneratedNotifications(prev => prev.map(n => n.id === viewingNotification.id ? updatedItem : n));
+      }
+
+      setViewingNotification(updatedItem);
+      setNotificationSuccess("Notificação retificada e salva com sucesso!");
+      setTimeout(() => setNotificationSuccess(null), 3500);
+    } catch (err: any) {
+      console.error(err);
+      alert("Erro ao retificar notificação: " + err.message);
+    } finally {
+      setIsSavingNotification(false);
+    }
+  };
+
+  const confirmDeleteNotification = async (notifId: string) => {
+    try {
+      if (isLocalMode) {
+        const updated = generatedNotifications.filter(n => n.id !== notifId);
+        setGeneratedNotifications(updated);
+        localStorage.setItem('lotes_notifications', JSON.stringify(updated));
+      } else {
+        await deleteDoc(doc(db, 'notifications', notifId));
+        setGeneratedNotifications(prev => prev.filter(n => n.id !== notifId));
+      }
+      setNotificationSuccess("Notificação excluída com sucesso.");
+      setTimeout(() => setNotificationSuccess(null), 3000);
+      
+      if (viewingNotification && viewingNotification.id === notifId) {
+        setViewingNotification(null);
+      }
+    } catch (err: any) {
+      console.error(err);
+      alert("Erro ao excluir notificação: " + err.message);
+    }
   };
 
   const handleCopyViewingText = () => {
@@ -767,228 +857,375 @@ export default function NotificationsPanel({
         </div>
       </div>
 
-      {/* Main Panel Description */}
-      <div className="bg-white p-6 rounded-[24px] border border-[#e5e5e0]">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="space-y-1">
-            <h3 className="text-sm font-bold uppercase tracking-wider text-[#5A5A40]">Acompanhamento de Não-Conformidades</h3>
-            <p className="text-xs text-[#5A5A40]/60">Gere notificações oficiais de irregularidades baseadas em não-conformidades encontradas durante os ensaios de cada PAC.</p>
-          </div>
-        </div>
+      {/* Sub-tabs Selector */}
+      <div className="flex border-b border-[#e5e5e0] gap-6 mt-2">
+        <button
+          onClick={() => setActiveSubTab('pending')}
+          className={cn(
+            "pb-3 text-sm font-bold uppercase tracking-wider relative transition-all border-b-2",
+            activeSubTab === 'pending'
+              ? "border-[#5A5A40] text-[#5A5A40]"
+              : "border-transparent text-[#5A5A40]/40 hover:text-[#5A5A40]/85"
+          )}
+        >
+          PACs Pendentes ({pacsWithNC.length})
+        </button>
+        <button
+          onClick={() => setActiveSubTab('history')}
+          className={cn(
+            "pb-3 text-sm font-bold uppercase tracking-wider relative transition-all border-b-2",
+            activeSubTab === 'history'
+              ? "border-[#5A5A40] text-[#5A5A40]"
+              : "border-transparent text-[#5A5A40]/40 hover:text-[#5A5A40]/85"
+          )}
+        >
+          Notificações Geradas ({generatedNotifications.length})
+        </button>
       </div>
 
-      {/* PAC Cards Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {pacsWithNC.map(pac => {
-          const pacHistory = generatedNotifications.filter(n => n.pac_id === pac.id || n.pac_name === pac.name);
-          const activeHistory = expandedPacHistory[pac.id] || false;
-
-          // Find the "lote atual" (latest batch by periodoFinal)
-          const sortedBatches = [...pac.batches].sort((a, b) => {
-            const dateA = getJsDate(a.periodoFinal)?.getTime() || 0;
-            const dateB = getJsDate(b.periodoFinal)?.getTime() || 0;
-            return dateB - dateA;
-          });
-          const loteAtual = sortedBatches[0];
-
-          // Evaluate each active rule to find the best recommendation matching the criteria
-          const getRecommendation = () => {
-            let bestSuggestion: { type: any; isEscalated: boolean; reason: string } | null = null;
-            for (const nType of notificationTypes) {
-              if (nType.rule && nType.rule.active) {
-                const evalResult = evaluateRuleForPac(pac, loteAtual, nType);
-                if (evalResult) {
-                  bestSuggestion = evalResult;
-                  break;
-                }
-              }
-            }
-            return bestSuggestion;
-          };
-
-          const recommendation = getRecommendation();
-
-          return (
-            <div key={pac.id} className="bg-white rounded-[32px] border border-[#e5e5e0] overflow-hidden flex flex-col h-full shadow-sm hover:shadow-md transition-shadow">
-              
-              {/* Header */}
-              <div className="p-6 border-b border-[#e5e5e0] bg-[#f5f5f0]/30 flex items-center justify-between gap-4">
-                <div className="space-y-1">
-                  <h4 className="font-display font-bold text-lg text-[#1a1a1a]">{pac.name}</h4>
-                  <div className="flex items-center gap-2">
-                    <span className="inline-flex items-center justify-center bg-red-100 text-red-800 text-xs font-bold px-2.5 py-0.5 rounded-full">
-                      {pac.batches.length} {pac.batches.length === 1 ? 'lote com desvio' : 'lotes com desvios'}
-                    </span>
-                  </div>
-                </div>
-                
-                {recommendation ? (
-                  <button
-                    onClick={() => handleOpenGenerateModal(pac, recommendation.type.id)}
-                    className="bg-amber-600 hover:bg-amber-700 text-white transition-colors py-2.5 px-4 rounded-xl text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 shadow-sm"
-                  >
-                    <Sparkles size={14} />
-                    GERAR RECOMENDADA
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => handleOpenGenerateModal(pac)}
-                    className="bg-[#5A5A40] text-white hover:bg-[#4a4a30] transition-colors py-2.5 px-4 rounded-xl text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 shadow-sm"
-                  >
-                    <Bell size={14} />
-                    GERAR NOTIFICAÇÃO
-                  </button>
-                )}
+      {activeSubTab === 'pending' ? (
+        <>
+          {/* Main Panel Description */}
+          <div className="bg-white p-6 rounded-[24px] border border-[#e5e5e0]">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <h3 className="text-sm font-bold uppercase tracking-wider text-[#5A5A40]">Acompanhamento de Não-Conformidades</h3>
+                <p className="text-xs text-[#5A5A40]/60">Gere notificações oficiais de irregularidades baseadas em não-conformidades encontradas durante os ensaios de cada PAC.</p>
               </div>
+            </div>
+          </div>
 
-              {/* Batches list */}
-              <div className="p-6 space-y-4 flex-1">
-                {/* Embedded Recommendation Indicator */}
-                {recommendation && (
-                  <div className="bg-amber-50/50 border border-amber-200/50 p-4 rounded-2xl flex items-start gap-3 mb-4">
-                    <div className="p-2 bg-amber-100 text-amber-700 rounded-xl mt-0.5">
-                      <Sparkles size={16} />
-                    </div>
-                    <div className="flex-1 space-y-1">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[9px] uppercase tracking-wider font-extrabold text-amber-800">
-                          Recomendação Inteligente de Autuação
+          {/* PAC Cards Grid */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {pacsWithNC.map(pac => {
+              const pacHistory = generatedNotifications.filter(n => n.pac_id === pac.id || n.pac_name === pac.name);
+              const activeHistory = expandedPacHistory[pac.id] || false;
+
+              // Find the "lote atual" (latest batch by periodoFinal)
+              const sortedBatches = [...pac.batches].sort((a, b) => {
+                const dateA = getJsDate(a.periodoFinal)?.getTime() || 0;
+                const dateB = getJsDate(b.periodoFinal)?.getTime() || 0;
+                return dateB - dateA;
+              });
+              const loteAtual = sortedBatches[0];
+
+              // Evaluate each active rule to find the best recommendation matching the criteria
+              const getRecommendation = () => {
+                let bestSuggestion: { type: any; isEscalated: boolean; reason: string } | null = null;
+                for (const nType of notificationTypes) {
+                  if (nType.rule && nType.rule.active) {
+                    const evalResult = evaluateRuleForPac(pac, loteAtual, nType);
+                    if (evalResult) {
+                      bestSuggestion = evalResult;
+                      break;
+                    }
+                  }
+                }
+                return bestSuggestion;
+              };
+
+              const recommendation = getRecommendation();
+
+              return (
+                <div key={pac.id} className="bg-white rounded-[32px] border border-[#e5e5e0] overflow-hidden flex flex-col h-full shadow-sm hover:shadow-md transition-shadow">
+                  
+                  {/* Header */}
+                  <div className="p-6 border-b border-[#e5e5e0] bg-[#f5f5f0]/30 flex items-center justify-between gap-4">
+                    <div className="space-y-1">
+                      <h4 className="font-display font-bold text-lg text-[#1a1a1a]">{pac.name}</h4>
+                      <div className="flex items-center gap-2">
+                        <span className="inline-flex items-center justify-center bg-red-100 text-red-800 text-xs font-bold px-2.5 py-0.5 rounded-full">
+                          {pac.batches.length} {pac.batches.length === 1 ? 'lote com desvio' : 'lotes com desvios'}
                         </span>
-                        {recommendation.isEscalated && (
-                          <span className="text-[8px] uppercase font-mono font-bold bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded">
-                            Regra De Escalonamento Ativa
-                          </span>
-                        )}
                       </div>
-                      <h5 className="text-xs font-bold text-gray-900 leading-snug">
-                        Sugerido: <span className="underline decoration-amber-500 font-extrabold">{recommendation.type.name}</span>
-                      </h5>
-                      <p className="text-[10px] text-gray-600 leading-normal">
-                        {recommendation.reason}
-                      </p>
+                    </div>
+                    
+                    {recommendation ? (
                       <button
                         onClick={() => handleOpenGenerateModal(pac, recommendation.type.id)}
-                        className="mt-2 text-[10px] font-semibold text-amber-950 bg-amber-100/80 hover:bg-amber-100 px-3 py-1.5 rounded-lg flex items-center gap-1 transition-colors uppercase tracking-wider border border-amber-200"
+                        className="bg-amber-600 hover:bg-amber-700 text-white transition-colors py-2.5 px-4 rounded-xl text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 shadow-sm"
                       >
-                        <Check size={12} />
-                        Aplicar Sugestão & Gerar
+                        <Sparkles size={14} />
+                        GERAR RECOMENDADA
                       </button>
-                    </div>
-                  </div>
-                )}
-
-                <p className="text-xs font-bold uppercase text-[#5A5A40]/70 tracking-wider">Lotes Vinculados</p>
-                
-                <div className="space-y-3 max-h-[280px] overflow-y-auto pr-1">
-                  {pac.batches.map((batch: any) => {
-                    const totalNCs = getNonConconformitiesCount(batch.nonConformities);
-                    const totalEnsaios = batch.numEnsaios || 0;
-                    const percentage = totalEnsaios > 0 
-                      ? ((totalNCs / totalEnsaios) * 100).toFixed(2) 
-                      : '0.00';
-
-                    return (
-                      <div key={batch.id} className="p-4 bg-[#f5f5f0]/40 rounded-2xl border border-[#e5e5e0]/70 flex flex-col sm:flex-row justify-between sm:items-center gap-3">
-                        <div className="space-y-1.5">
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs font-bold text-gray-500 font-mono">
-                              P: {formatDateShort(batch.periodoInicial)} - {formatDateShort(batch.periodoFinal)}
-                            </span>
-                            <span className="text-[10px] uppercase font-bold px-2 py-0.5 roundedbg bg-[#5A5A40]/10 text-[#5A5A40]">
-                              {batch.status}
-                            </span>
-                          </div>
-                          
-                          {/* Percentage Indicators */}
-                          <div className="space-y-1">
-                            <div className="flex justify-between items-center text-xs text-[#5A5A40]">
-                              <span className="font-semibold text-red-600">{percentage}% Não-Conformidade</span>
-                              <span className="text-gray-400">({totalNCs} desvios em {totalEnsaios} ensaios)</span>
-                            </div>
-                            {/* Simple thin progress bar */}
-                            <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
-                              <div 
-                                className="bg-red-500 h-full rounded-full" 
-                                style={{ width: `${Math.min(Number(percentage), 100)}%` }} 
-                              />
-                            </div>
-                          </div>
-                        </div>
-
-                        <button
-                          onClick={() => setSelectedBatchForDetails(batch)}
-                          className="px-4 py-2 text-xs font-bold bg-white border border-[#e5e5e0] hover:bg-[#f5f5f0] text-[#5A5A40] rounded-xl self-end sm:self-center transition-colors shadow-sm"
-                        >
-                          Detalhar
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Collapsible History Section */}
-              <div className="border-t border-[#e5e5e0] bg-gray-50/50">
-                <button
-                  onClick={() => toggleHistory(pac.id)}
-                  className="w-full p-4 flex items-center justify-between text-xs font-bold uppercase text-[#5A5A40]/70 hover:bg-gray-100/50 transition-colors"
-                >
-                  <span className="flex items-center gap-2">
-                    <History size={14} className="text-[#5A5A40]" />
-                    Histórico de Notificações ({pacHistory.length})
-                  </span>
-                  {activeHistory ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                </button>
-
-                {activeHistory && (
-                  <div className="p-4 bg-white border-t border-[#e5e5e0] space-y-3 max-h-[220px] overflow-y-auto animate-in slide-in-from-top-2 duration-200">
-                    {pacHistory.length === 0 ? (
-                      <p className="text-xs text-gray-400 italic text-center py-4">Nenhuma notificação gerada para este PAC.</p>
                     ) : (
-                      pacHistory.map((item: any) => (
-                        <div key={item.id} className="p-3 bg-gray-50 rounded-xl border border-gray-200 space-y-2 text-xs">
-                          <div className="flex justify-between items-start gap-2">
-                            <div className="space-y-0.5">
-                              <span className="font-bold text-gray-800 uppercase block">{item.notification_type_name}</span>
-                              <span className="text-[10px] text-gray-400 font-mono block">{formatDateTime(item.createdAt)}</span>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => handleOpenViewingNotification(item)}
-                              className="text-[10px] font-bold text-white bg-[#5A5A40] hover:bg-[#4a4a30] py-1 px-3 rounded-lg transition-all shadow-sm"
-                            >
-                              Visualizar & Exportar
-                            </button>
-                          </div>
-                          
-                          {item.notes && (
-                            <p className="text-[#5A5A40] leading-relaxed bg-white p-2 rounded-lg border border-gray-100">
-                              <strong>Obs:</strong> {item.notes}
-                            </p>
-                          )}
-                          
-                          <div className="text-[10px] text-gray-400">
-                            Lotes inclusos: {item.batches?.length || 0} (Ensaios abrangidos: {item.batches?.reduce((acc: number, b: any) => acc + (b.numEnsaios || 0), 0) || 0})
-                          </div>
-                        </div>
-                      ))
+                      <button
+                        onClick={() => handleOpenGenerateModal(pac)}
+                        className="bg-[#5A5A40] text-white hover:bg-[#4a4a30] transition-colors py-2.5 px-4 rounded-xl text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 shadow-sm"
+                      >
+                        <Bell size={14} />
+                        GERAR NOTIFICAÇÃO
+                      </button>
                     )}
                   </div>
-                )}
+
+                  {/* Batches list */}
+                  <div className="p-6 space-y-4 flex-1">
+                    {/* Embedded Recommendation Indicator */}
+                    {recommendation && (
+                      <div className="bg-amber-50/50 border border-amber-200/50 p-4 rounded-2xl flex items-start gap-3 mb-4">
+                        <div className="p-2 bg-amber-100 text-amber-700 rounded-xl mt-0.5">
+                          <Sparkles size={16} />
+                        </div>
+                        <div className="flex-1 space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[9px] uppercase tracking-wider font-extrabold text-amber-800">
+                              Recomendação Inteligente de Autuação
+                            </span>
+                            {recommendation.isEscalated && (
+                              <span className="text-[8px] uppercase font-mono font-bold bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded">
+                                Regra De Escalonamento Ativa
+                              </span>
+                            )}
+                          </div>
+                          <h5 className="text-xs font-bold text-gray-900 leading-snug">
+                            Sugerido: <span className="underline decoration-amber-500 font-extrabold">{recommendation.type.name}</span>
+                          </h5>
+                          <p className="text-[10px] text-gray-600 leading-normal">
+                            {recommendation.reason}
+                          </p>
+                          <button
+                            onClick={() => handleOpenGenerateModal(pac, recommendation.type.id)}
+                            className="mt-2 text-[10px] font-semibold text-amber-950 bg-amber-100/80 hover:bg-amber-100 px-3 py-1.5 rounded-lg flex items-center gap-1 transition-colors uppercase tracking-wider border border-amber-200"
+                          >
+                            <Check size={12} />
+                            Aplicar Sugestão & Gerar
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    <p className="text-xs font-bold uppercase text-[#5A5A40]/70 tracking-wider">Lotes Vinculados</p>
+                    
+                    <div className="space-y-3 max-h-[280px] overflow-y-auto pr-1">
+                      {pac.batches.map((batch: any) => {
+                        const totalNCs = getNonConconformitiesCount(batch.nonConformities);
+                        const totalEnsaios = batch.numEnsaios || 0;
+                        const percentage = totalEnsaios > 0 
+                          ? ((totalNCs / totalEnsaios) * 100).toFixed(2) 
+                          : '0.00';
+
+                        return (
+                          <div key={batch.id} className="p-4 bg-[#f5f5f0]/40 rounded-2xl border border-[#e5e5e0]/70 flex flex-col sm:flex-row justify-between sm:items-center gap-3">
+                            <div className="space-y-1.5">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-xs font-bold text-gray-500 font-mono">
+                                  P: {formatDateShort(batch.periodoInicial)} - {formatDateShort(batch.periodoFinal)}
+                                </span>
+                                <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded bg-[#5A5A40]/10 text-[#5A5A40]">
+                                  {batch.status}
+                                </span>
+                                {batch.ensaioForaDoPrazo && (
+                                  <span className="flex items-center gap-1 text-[9px] uppercase font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300">
+                                    <Sparkles size={10} className="text-amber-600 animate-pulse" /> ENSAIO FORA DO PRAZO
+                                  </span>
+                                )}
+                              </div>
+                              
+                              {/* Percentage Indicators */}
+                              <div className="space-y-1">
+                                <div className="flex justify-between items-center text-xs text-[#5A5A40]">
+                                  <span className="font-semibold text-red-600">{percentage}% Não-Conformidade</span>
+                                  <span className="text-gray-400">({totalNCs} desvios em {totalEnsaios} ensaios)</span>
+                                </div>
+                                {/* Simple thin progress bar */}
+                                <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
+                                  <div 
+                                    className="bg-red-500 h-full rounded-full" 
+                                    style={{ width: `${Math.min(Number(percentage), 100)}%` }} 
+                                  />
+                                </div>
+                              </div>
+                            </div>
+
+                            <button
+                              onClick={() => setSelectedBatchForDetails(batch)}
+                              className="px-4 py-2 text-xs font-bold bg-white border border-[#e5e5e0] hover:bg-[#f5f5f0] text-[#5A5A40] rounded-xl self-end sm:self-center transition-colors shadow-sm"
+                            >
+                              Detalhar
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Collapsible History Section */}
+                  <div className="border-t border-[#e5e5e0] bg-gray-50/50">
+                    <button
+                      onClick={() => toggleHistory(pac.id)}
+                      className="w-full p-4 flex items-center justify-between text-xs font-bold uppercase text-[#5A5A40]/70 hover:bg-gray-100/50 transition-colors"
+                    >
+                      <span className="flex items-center gap-2">
+                        <History size={14} className="text-[#5A5A40]" />
+                        Histórico de Notificações ({pacHistory.length})
+                      </span>
+                      {activeHistory ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                    </button>
+
+                    {activeHistory && (
+                      <div className="p-4 bg-white border-t border-[#e5e5e0] space-y-3 max-h-[220px] overflow-y-auto animate-in slide-in-from-top-2 duration-200">
+                        {pacHistory.length === 0 ? (
+                          <p className="text-xs text-gray-400 italic text-center py-4">Nenhuma notificação gerada para este PAC.</p>
+                        ) : (
+                          pacHistory.map((item: any) => (
+                            <div key={item.id} className="p-3 bg-gray-50 rounded-xl border border-gray-200 space-y-2 text-xs">
+                              <div className="flex justify-between items-start gap-2">
+                                <div className="space-y-0.5">
+                                  <span className="font-bold text-gray-800 uppercase block">{item.notification_type_name}</span>
+                                  <span className="text-[10px] text-gray-400 font-mono block">{formatDateTime(item.createdAt)}</span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenViewingNotification(item)}
+                                  className="text-[10px] font-bold text-white bg-[#5A5A40] hover:bg-[#4a4a30] py-1 px-3 rounded-lg transition-all shadow-sm"
+                                >
+                                  Visualizar & Exportar
+                                </button>
+                              </div>
+                              
+                              {item.notes && (
+                                <p className="text-[#5A5A40] leading-relaxed bg-white p-2 rounded-lg border border-gray-100">
+                                  <strong>Obs:</strong> {item.notes}
+                                </p>
+                              )}
+                              
+                              <div className="text-[10px] text-gray-400">
+                                Lotes inclusos: {item.batches?.length || 0} (Ensaios abrangidos: {item.batches?.reduce((acc: number, b: any) => acc + (b.numEnsaios || 0), 0) || 0})
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                </div>
+              );
+            })}
+
+            {pacsWithNC.length === 0 && (
+              <div className="col-span-full text-center py-24 bg-white rounded-[40px] border border-dashed border-[#e5e5e0]">
+                <Bell size={48} className="mx-auto mb-4 text-[#5A5A40]/30" />
+                <h4 className="text-lg font-display font-medium text-[#5A5A40] mb-1">Nenhum PAC com não-conformidades ativas</h4>
+                <p className="text-xs text-[#5A5A40]/60 max-w-sm mx-auto">Parabéns! Todos os lançamentos de lotes estão totalmente conformes e revisados no momento.</p>
               </div>
-
-            </div>
-          );
-        })}
-
-        {pacsWithNC.length === 0 && (
-          <div className="col-span-full text-center py-24 bg-white rounded-[40px] border border-dashed border-[#e5e5e0]">
-            <Bell size={48} className="mx-auto mb-4 text-[#5A5A40]/30" />
-            <h4 className="text-lg font-display font-medium text-[#5A5A40] mb-1">Nenhum PAC com não-conformidades ativas</h4>
-            <p className="text-xs text-[#5A5A40]/60 max-w-sm mx-auto">Parabéns! Todos os lançamentos de lotes estão totalmente conformes e revisados no momento.</p>
+            )}
           </div>
-        )}
-      </div>
+        </>
+      ) : (
+        <>
+          {/* Section: History Tab & General Notification Central */}
+          <div className="bg-white p-6 rounded-[24px] border border-[#e5e5e0] space-y-4">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <h3 className="text-sm font-bold uppercase tracking-wider text-[#5A5A40]">Central de Notificações Enviadas</h3>
+                <p className="text-xs text-[#5A5A40]/60">Consulte, retifique ou exclua qualquer notificação administrativa que já foi gerada pelo sistema.</p>
+              </div>
+              <div className="relative w-full md:w-80">
+                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+                <input 
+                  type="text"
+                  placeholder="Buscar PAC, tipo ou assunto..."
+                  className="w-full pl-10 pr-4 py-2.5 bg-[#f5f5f0] border-none rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-[#5A5A40]/10"
+                  value={notifSearch}
+                  onChange={e => setNotifSearch(e.target.value)}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Table or Responsive Cards list of all generated notifications */}
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+            {generatedNotifications.filter(n => {
+              if (!notifSearch) return true;
+              const matchPac = n.pac_name?.toLowerCase().includes(notifSearch.toLowerCase());
+              const matchType = n.notification_type_name?.toLowerCase().includes(notifSearch.toLowerCase());
+              const matchNotes = n.notes?.toLowerCase().includes(notifSearch.toLowerCase());
+              return matchPac || matchType || matchNotes;
+            }).map(item => {
+              const dateCreated = getJsDate(item.createdAt);
+              const formattedDate = dateCreated ? format(dateCreated, "dd/MM/yyyy HH:mm", { locale: ptBR }) : '-';
+              
+              return (
+                <div key={item.id} className="bg-white p-6 rounded-[24px] border border-[#e5e5e0] relative hover:shadow-lg transition-all group flex flex-col justify-between h-full">
+                  <div>
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <span className="text-[10px] font-bold text-[#5A5A40] opacity-50 block uppercase tracking-wider">PAC Notificado</span>
+                        <h4 className="text-lg font-bold text-gray-900 tracking-tight mt-0.5">{item.pac_name}</h4>
+                      </div>
+                      <span className={cn(
+                        "px-2.5 py-1 rounded-lg text-[9px] font-extrabold uppercase bg-sky-50 text-sky-700 tracking-wide border border-sky-200/50",
+                        item.status === 'RETIFICADA' && "bg-amber-50 text-amber-700 border-amber-200"
+                      )}>
+                        {item.status || item.notification_type_name || 'Autuação'}
+                      </span>
+                    </div>
+
+                    <div className="mt-4 space-y-2 text-xs">
+                      <div className="flex justify-between border-b border-gray-100 pb-1.5">
+                        <span className="text-gray-400 font-medium">Tipo:</span>
+                        <span className="font-bold text-[#5A5A40]">{item.notification_type_name}</span>
+                      </div>
+                      <div className="flex justify-between border-b border-gray-100 pb-1.5">
+                        <span className="text-gray-400 font-medium">Gerada Em:</span>
+                        <span className="font-mono text-gray-600">{formattedDate}</span>
+                      </div>
+                      {item.rectifiedAt && (
+                        <div className="flex justify-between border-b border-gray-100 pb-1.5 text-amber-750">
+                          <span className="font-medium">Retificada Em:</span>
+                          <span className="font-bold font-mono text-amber-600">{formatDateShort(item.rectifiedAt)}</span>
+                        </div>
+                      )}
+                      
+                      {item.notes && (
+                        <div className="bg-gray-50/70 p-2.5 rounded-xl border border-gray-100 mt-3 text-[11px] leading-relaxed italic text-gray-600">
+                          <strong className="block text-[8px] font-extrabold uppercase text-gray-400 tracking-wider font-sans not-italic mb-0.5">Observações:</strong>
+                          "{item.notes}"
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2 mt-6 pt-4 border-t border-gray-100">
+                    <button
+                      type="button"
+                      onClick={() => handleOpenViewingNotification(item)}
+                      className="flex-1 py-2 rounded-xl bg-[#5A5A40]/5 hover:bg-[#5A5A40]/10 text-[#5A5A40] text-xs font-bold transition-all flex items-center justify-center gap-1.5"
+                    >
+                      <Eye size={13} />
+                      Consultar & Retificar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNotifToDelete(item.id)}
+                      className="p-2 rounded-xl hover:bg-rose-50 text-rose-500 hover:text-rose-600 transition-all border border-transparent hover:border-rose-100"
+                      title="Excluir Notificação"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+
+            {generatedNotifications.filter(n => {
+              if (!notifSearch) return true;
+              const matchPac = n.pac_name?.toLowerCase().includes(notifSearch.toLowerCase());
+              const matchType = n.notification_type_name?.toLowerCase().includes(notifSearch.toLowerCase());
+              const matchNotes = n.notes?.toLowerCase().includes(notifSearch.toLowerCase());
+              return matchPac || matchType || matchNotes;
+            }).length === 0 && (
+              <div className="col-span-full text-center py-20 bg-white rounded-[32px] border border-dashed border-[#e5e5e0] flex flex-col items-center justify-center">
+                <BellOff className="text-gray-300 mb-4" size={48} />
+                <h4 className="font-bold text-gray-900">Nenhuma notificação encontrada</h4>
+                <p className="text-xs text-gray-500 mt-1">Nenhuma notificação com base no filtro ou histórico cadastrado no sistema.</p>
+              </div>
+            )}
+          </div>
+        </>
+      )}
 
       {/* Batch Details Modal */}
       {selectedBatchForDetails && (
@@ -1026,6 +1263,18 @@ export default function NotificationsPanel({
               </div>
 
               {/* Grouped nonconformity list */}
+              {selectedBatchForDetails.ensaioForaDoPrazo && (
+                <div className="p-4 bg-amber-50 rounded-2xl border border-amber-200 text-amber-900 flex items-start gap-2.5">
+                  <Sparkles size={16} className="text-amber-600 shrink-0 mt-0.5" />
+                  <div className="space-y-0.5 text-left">
+                    <p className="text-xs font-bold uppercase tracking-wide">Entrega realizada fora do prazo</p>
+                    <p className="text-[11px] text-amber-800 leading-normal">
+                      Este lote foi expressamente assinalado como "ensaio fora do prazo" durante a conferência, caracterizando uma irregularidade administrativa aplicável para fins de notificação.
+                    </p>
+                  </div>
+                </div>
+              )}
+
               <div className="space-y-4">
                 <p className="text-xs font-bold uppercase text-[#5A5A40]/70 tracking-wider">Detalhamento dos Desvios (Agrupados por Motivo)</p>
                 
@@ -1232,6 +1481,23 @@ export default function NotificationsPanel({
 
                 {/* Left Active Fields scroll wrapper */}
                 <div className="flex-1 overflow-y-auto p-5 space-y-4">
+                  
+                  {/* General Notification/Rectification Notes */}
+                  <div className="space-y-1.5 bg-amber-500/5 p-3 rounded-2xl border border-amber-500/10 mb-2">
+                    <div className="flex items-center gap-1.5">
+                      <Sparkles size={13} className="text-amber-600 shrink-0" />
+                      <label className="text-[10px] font-extrabold uppercase tracking-wider text-amber-800">
+                        Observações e Retificações Gerais
+                      </label>
+                    </div>
+                    <textarea 
+                      rows={2}
+                      placeholder="Adicione observações ou anotações sobre as retificações feitas nesta notificação..."
+                      className="w-full p-2 bg-white border border-[#e5e5e0] rounded-xl text-xs leading-normal resize-none focus:outline-none focus:ring-1 focus:ring-amber-500/30 font-medium"
+                      value={viewingNotificationNotes}
+                      onChange={e => setViewingNotificationNotes(e.target.value)}
+                    />
+                  </div>
                   
                   {/* Ofício editor inputs */}
                   {previewChannel === 'oficio' && (
@@ -1535,6 +1801,16 @@ export default function NotificationsPanel({
 
                 <button
                   type="button"
+                  onClick={handleSaveRectification}
+                  disabled={isSavingNotification}
+                  className="bg-amber-500 hover:bg-amber-600 disabled:opacity-50 transition-colors py-2.5 px-5 rounded-xl font-bold text-xs text-white flex items-center gap-1.5 shadow-md shadow-amber-500/10"
+                >
+                  <Sparkles size={14} />
+                  {isSavingNotification ? 'Retificando...' : 'Retificar Notificação'}
+                </button>
+
+                <button
+                  type="button"
                   onClick={() => setViewingNotification(null)}
                   className="bg-gray-200 hover:bg-gray-300 transition-colors py-2.5 px-5 rounded-xl font-bold text-xs text-gray-700"
                 >
@@ -1543,6 +1819,45 @@ export default function NotificationsPanel({
               </div>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* Excluir Notification Confirmation Modal */}
+      {notifToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-md rounded-[32px] shadow-2xl overflow-hidden p-6 text-center space-y-4 animate-in zoom-in duration-200">
+            <div className="w-12 h-12 bg-rose-50 rounded-full flex items-center justify-center mx-auto text-rose-600">
+              <AlertTriangle size={24} />
+            </div>
+            
+            <div className="space-y-1">
+              <h4 className="text-lg font-bold text-gray-900 tracking-tight">Excluir Notificação Administrativa?</h4>
+              <p className="text-xs text-gray-500 leading-relaxed">
+                Tem certeza de que deseja permanente excluir esta notificação? Esta ação não pode ser desfeita e removerá o histórico administrativo correspondente do sistema.
+              </p>
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setNotifToDelete(null)}
+                className="flex-1 py-2.5 bg-gray-100 hover:bg-gray-200 transition-colors text-gray-700 text-xs font-bold rounded-xl"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  await confirmDeleteNotification(notifToDelete);
+                  setNotifToDelete(null);
+                }}
+                className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-700 transition-colors text-white text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 shadow-md shadow-rose-600/15"
+              >
+                <Trash2 size={13} />
+                Confirmar Exclusão
+              </button>
+            </div>
           </div>
         </div>
       )}
