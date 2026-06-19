@@ -53,7 +53,9 @@ import {
   Upload,
   Loader2,
   ChevronDown,
-  Copy
+  Copy,
+  Sparkles,
+  BookOpen
 } from 'lucide-react';
 import { format, addDays, differenceInDays, isAfter, isBefore, startOfDay, parse } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -76,6 +78,7 @@ import {
 } from 'recharts';
 import NotificationsPanel from './components/NotificationsPanel';
 import NotificationTemplatesManager from './components/NotificationTemplatesManager';
+import { SystemTutorial } from './components/SystemTutorial';
 
 // Utility for tailwind classes
 function cn(...inputs: ClassValue[]) {
@@ -352,7 +355,7 @@ export default function App() {
 
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('open'); // Changed default to 'open'
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'config' | 'stats' | 'notifications'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'config' | 'stats' | 'notifications' | 'tutorial'>('dashboard');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingBatch, setEditingBatch] = useState<Batch | null>(null);
   const [batchToDelete, setBatchToDelete] = useState<string | null>(null);
@@ -424,6 +427,19 @@ export default function App() {
       displayName: 'Convidado Local',
       emailVerified: true
     } as any);
+  };
+
+  const enableLocalMode = () => {
+    setIsLocalMode(true);
+    localStorage.setItem('lotes_isLocalMode', 'true');
+    setUser({
+      uid: 'client-demo',
+      email: user?.email || 'demo@ipempr.org',
+      displayName: user?.displayName || 'Convidado Local',
+      emailVerified: true
+    } as any);
+    setError(null);
+    window.location.reload();
   };
 
   const handleLogout = () => {
@@ -584,10 +600,37 @@ export default function App() {
       // Load local notification types
       const savedNotificationTypes = localStorage.getItem('lotes_notification_types');
       let initialNotificationTypes: ConfigItem[] = [];
+      const defaultAlertaType = { 
+        id: 'nt0', 
+        name: 'ALERTA 1 - ORIENTAÇÃO',
+        rule: {
+          active: true,
+          validadeMeses: 12,
+          criterioA_ativo: true,
+          criterioA_ncId: '',
+          criterioA_limite: 0,
+          criterioB_ativo: false,
+          criterioB_ncId: '',
+          criterioB_limite: 0,
+          operadorLogico: 'OU' as const,
+          limiteNotificacoes: 1,
+          proximoNivel_typeId: 'nt1',
+          regraAtraso_ativa: true,
+          regraAtraso_ncId: '',
+          regraAtraso_limiteRepeticoes: 1
+        }
+      };
+
       if (savedNotificationTypes) {
         initialNotificationTypes = JSON.parse(savedNotificationTypes);
+        // Ensure "ALERTA 1 - ORIENTAÇÃO" type exists as first option
+        if (!initialNotificationTypes.some(t => t.id === 'nt0' || t.name === 'ALERTA 1 - ORIENTAÇÃO')) {
+          initialNotificationTypes.unshift(defaultAlertaType);
+          localStorage.setItem('lotes_notification_types', JSON.stringify(initialNotificationTypes));
+        }
       } else {
         initialNotificationTypes = [
+          defaultAlertaType,
           { 
             id: 'nt1', 
             name: 'Notificação de Irregularidade',
@@ -602,7 +645,10 @@ export default function App() {
               criterioB_limite: 10,
               operadorLogico: 'OU',
               limiteNotificacoes: 2,
-              proximoNivel_typeId: 'nt2'
+              proximoNivel_typeId: 'nt2',
+              regraAtraso_ativa: false,
+              regraAtraso_ncId: '',
+              regraAtraso_limiteRepeticoes: 2
             }
           },
           { 
@@ -619,7 +665,10 @@ export default function App() {
               criterioB_limite: 15,
               operadorLogico: 'E',
               limiteNotificacoes: 1,
-              proximoNivel_typeId: 'nt3'
+              proximoNivel_typeId: 'nt3',
+              regraAtraso_ativa: false,
+              regraAtraso_ncId: '',
+              regraAtraso_limiteRepeticoes: 2
             }
           },
           { 
@@ -636,7 +685,10 @@ export default function App() {
               criterioB_limite: 20,
               operadorLogico: 'OU',
               limiteNotificacoes: 3,
-              proximoNivel_typeId: ''
+              proximoNivel_typeId: '',
+              regraAtraso_ativa: false,
+              regraAtraso_ncId: '',
+              regraAtraso_limiteRepeticoes: 2
             }
           }
         ];
@@ -1094,6 +1146,15 @@ export default function App() {
               >
                 Configurações
               </button>
+              <button 
+                onClick={() => setActiveTab('tutorial')}
+                className={cn(
+                  "px-4 py-2 rounded-full text-sm font-medium transition-all flex items-center gap-1.5",
+                  activeTab === 'tutorial' ? "bg-[#5A5A40] text-white" : "text-[#5A5A40] hover:bg-[#f0f0e5]"
+                )}
+              >
+                <BookOpen size={14} className="mt-0.5" /> Tutorial do Sistema
+              </button>
             </nav>
           </div>
           
@@ -1114,15 +1175,59 @@ export default function App() {
       </header>
 
       <main className="max-w-7xl mx-auto p-6">
-        {error && (
-          <div className="mb-6 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <AlertCircle size={18} />
-              <p className="text-sm">{error}</p>
+        {error && (() => {
+          const isQuota = error.toLowerCase().includes('quota') || error.toLowerCase().includes('exceeded') || error.toLowerCase().includes('cota') || error.toLowerCase().includes('limite') || error.toLowerCase().includes('permission');
+          return (
+            <div className={cn(
+              "mb-6 rounded-[24px] p-6 shadow-md border",
+              isQuota ? "bg-amber-50 border-amber-200 text-amber-900" : "bg-red-50 border-red-200 text-red-900"
+            )}>
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="flex items-start gap-3.5">
+                  <AlertCircle size={22} className={cn("shrink-0 mt-0.5", isQuota ? "text-amber-600" : "text-red-600")} />
+                  <div className="space-y-1">
+                    <h3 className="text-sm font-bold uppercase tracking-wider">
+                      {isQuota ? "Uso da Cota Diária do Banco de Dados Cloud Excedida" : "Erro de Conexão / Operação no Servidor"}
+                    </h3>
+                    <p className="text-xs leading-relaxed max-w-4xl">
+                      {isQuota ? (
+                        <>
+                          O servidor do banco de dados na nuvem (Firestore) atingiu os limites diários do plano gratuito para este projeto. 
+                          Para que você não perca seu progresso e continue utilizando todas as funcionalidades normalmente, você pode reativar o <strong>Modo de Armazenamento Local</strong> de backup imediato. Seus dados serão mantidos de forma segura no seu navegador.
+                        </>
+                      ) : (
+                        <>
+                          Ocorreu um problema ao conectar ou sincronizar as informações com a nuvem. Você pode continuar trabalhando de forma offline e segura mudando para o Modo de Armazenamento Local.
+                        </>
+                      )}
+                    </p>
+                    <p className={cn("text-[10px] leading-normal mt-1 border-t pt-1 font-mono", isQuota ? "text-amber-700/75 border-amber-200/50" : "text-red-700/75 border-red-200/50")}>
+                      Detalhes técnicos: {error}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2.5 self-end md:self-center shrink-0">
+                  <button
+                    onClick={enableLocalMode}
+                    className={cn(
+                      "px-4 py-2 text-white font-bold text-xs rounded-full transition-colors shadow-md flex items-center gap-1.5 cursor-pointer",
+                      isQuota ? "bg-amber-600 hover:bg-amber-700" : "bg-red-600 hover:bg-red-700"
+                    )}
+                  >
+                    <Sparkles size={13} className="animate-pulse" /> Ativar Modo Local Inteligente
+                  </button>
+                  <button 
+                    onClick={() => setError(null)} 
+                    className="p-2 hover:bg-black/5 rounded-full transition-colors"
+                    title="Ignorar"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              </div>
             </div>
-            <button onClick={() => setError(null)}><X size={18} /></button>
-          </div>
-        )}
+          );
+        })()}
 
         {activeTab === 'dashboard' ? (
           <>
@@ -1298,7 +1403,7 @@ export default function App() {
             logoUrl={logoUrl}
             signatures={signatures}
           />
-        ) : (
+        ) : activeTab === 'config' ? (
           <ConfigPanel 
             pacs={pacs} 
             collaborators={collaborators} 
@@ -1324,6 +1429,8 @@ export default function App() {
             signatures={signatures}
             saveSignatures={saveSignatures}
           />
+        ) : (
+          <SystemTutorial />
         )}
       </main>
 
@@ -2185,6 +2292,7 @@ function ConfigPanel({
   // States for linking non-conformity config to framing
   const [selectedFramingId, setSelectedFramingId] = useState('');
   const [editingConfigFramingId, setEditingConfigFramingId] = useState('');
+  const [motivoSearch, setMotivoSearch] = useState('');
 
   // Signature Form States
   const [sigName, setSigName] = useState('');
@@ -3111,11 +3219,31 @@ function ConfigPanel({
     }
   };
 
-  const items = 
+  const sortedNonConformitiesConfigs = [...(nonConformitiesConfigs || [])].sort((a, b) => 
+    (a.name || '').localeCompare(b.name || '', 'pt-BR', { sensitivity: 'base' })
+  );
+
+  const sortedFramings = [...(framings || [])].sort((a, b) => {
+    const numCompare = (a.number || '').localeCompare(b.number || '', 'pt-BR', { numeric: true, sensitivity: 'base' });
+    if (numCompare !== 0) return numCompare;
+    return (a.description || '').localeCompare(b.description || '', 'pt-BR', { sensitivity: 'base' });
+  });
+
+  const baseItems = 
     activeConfig === 'pacs' ? pacs : 
     activeConfig === 'collabs' ? collaborators : 
     activeConfig === 'status' ? statuses : 
-    activeConfig === 'notification_types' ? notificationTypes : nonConformitiesConfigs;
+    activeConfig === 'notification_types' ? notificationTypes : sortedNonConformitiesConfigs;
+
+  const items = baseItems.filter((item: any) => {
+    if (activeConfig === 'non_conformities' && motivoSearch.trim() !== '') {
+      const q = motivoSearch.toLowerCase().trim();
+      return (item.name || '').toLowerCase().includes(q) || 
+             (item.framingNumber || '').toLowerCase().includes(q) || 
+             (item.framingDescription || '').toLowerCase().includes(q);
+    }
+    return true;
+  });
 
   return (
     <div className="bg-white rounded-[32px] p-8 border border-[#e5e5e0]">
@@ -3752,7 +3880,7 @@ function ConfigPanel({
                   onChange={e => setSelectedFramingId(e.target.value)}
                 >
                   <option value="">-- Sem Enquadramento --</option>
-                  {(framings || []).map((f: any) => (
+                  {sortedFramings.map((f: any) => (
                     <option key={f.id} value={f.id}>
                       N° {f.number} - {f.description.length > 50 ? f.description.substring(0, 50) + '...' : f.description}
                     </option>
@@ -3816,7 +3944,7 @@ function ConfigPanel({
                           onChange={e => setEditingConfigFramingId(e.target.value)}
                         >
                           <option value="">-- Sem Enquadramento --</option>
-                          {(framings || []).map((f: any) => (
+                          {sortedFramings.map((f: any) => (
                             <option key={f.id} value={f.id}>
                               N° {f.number} - {f.description.length > 30 ? f.description.substring(0, 30) + '...' : f.description}
                             </option>
@@ -3955,12 +4083,12 @@ function ConfigPanel({
 
               {/* Framings list */}
               <div className="space-y-2">
-                {(framings || []).filter((f: any) => {
+                {sortedFramings.filter((f: any) => {
                   if (!framingSearch.trim()) return true;
                   const query = framingSearch.toLowerCase().trim();
                   return (f.number || '').toLowerCase().includes(query) || (f.description || '').toLowerCase().includes(query);
                 }).length > 0 ? (
-                  (framings || []).filter((f: any) => {
+                  sortedFramings.filter((f: any) => {
                     if (!framingSearch.trim()) return true;
                     const query = framingSearch.toLowerCase().trim();
                     return (f.number || '').toLowerCase().includes(query) || (f.description || '').toLowerCase().includes(query);

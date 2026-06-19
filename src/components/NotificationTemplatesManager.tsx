@@ -116,6 +116,9 @@ export default function NotificationTemplatesManager({
   const [operadorLogico, setOperadorLogico] = useState<'E' | 'OU'>('OU');
   const [limiteNotificacoes, setLimiteNotificacoes] = useState(2);
   const [proximoNivelTypeId, setProximoNivelTypeId] = useState('');
+  const [regraAtrasoAtiva, setRegraAtrasoAtiva] = useState(false);
+  const [regraAtrasoNcId, setRegraAtrasoNcId] = useState('');
+  const [regraAtrasoLimiteRepeticoes, setRegraAtrasoLimiteRepeticoes] = useState(2);
   const [isSavingRule, setIsSavingRule] = useState(false);
   const [saveRuleSuccess, setSaveRuleSuccess] = useState(false);
 
@@ -161,6 +164,9 @@ export default function NotificationTemplatesManager({
           setOperadorLogico(r.operadorLogico ?? 'OU');
           setLimiteNotificacoes(r.limiteNotificacoes ?? 2);
           setProximoNivelTypeId(r.proximoNivel_typeId ?? '');
+          setRegraAtrasoAtiva(r.regraAtraso_ativa ?? false);
+          setRegraAtrasoNcId(r.regraAtraso_ncId ?? '');
+          setRegraAtrasoLimiteRepeticoes(r.regraAtraso_limiteRepeticoes ?? 2);
         } else {
           resetRulesToDefault();
         }
@@ -197,6 +203,9 @@ export default function NotificationTemplatesManager({
     setOperadorLogico('OU');
     setLimiteNotificacoes(2);
     setProximoNivelTypeId('');
+    setRegraAtrasoAtiva(false);
+    setRegraAtrasoNcId('');
+    setRegraAtrasoLimiteRepeticoes(2);
   };
 
   // Handle saving the edited rules properties
@@ -216,7 +225,10 @@ export default function NotificationTemplatesManager({
       criterioB_limite: Number(criterioBLimite),
       operadorLogico,
       limiteNotificacoes: Number(limiteNotificacoes),
-      proximoNivel_typeId: proximoNivelTypeId
+      proximoNivel_typeId: proximoNivelTypeId,
+      regraAtraso_ativa: regraAtrasoAtiva,
+      regraAtraso_ncId: regraAtrasoNcId,
+      regraAtraso_limiteRepeticoes: Number(regraAtrasoLimiteRepeticoes)
     };
 
     try {
@@ -1296,7 +1308,7 @@ export default function NotificationTemplatesManager({
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               <div className="space-y-1.5 bg-white p-4 rounded-2xl border border-[#e5e5e0]">
-                <label className="text-[10px] font-bold uppercase text-[#5A5A40]/70 text-gray-800 font-bold block mb-1">Limite de Repetições do Mesmo Tipo</label>
+                <label className="text-[10px] font-bold uppercase text-[#5A5A40]/70 text-gray-850 font-bold block mb-1">Limite de Repetições do Mesmo Tipo</label>
                 <div className="relative">
                   <input 
                     type="number" 
@@ -1314,7 +1326,7 @@ export default function NotificationTemplatesManager({
               </div>
 
               <div className="space-y-1.5 bg-white p-4 rounded-2xl border border-[#e5e5e0]">
-                <label className="text-[10px] font-bold uppercase text-[#5A5A40]/70 text-gray-800 font-bold block mb-1">Próximo Nível (Transição de Escalonamento)</label>
+                <label className="text-[10px] font-bold uppercase text-[#5A5A40]/70 text-gray-850 font-bold block mb-1">Próximo Nível (Transição de Escalonamento)</label>
                 <select 
                   value={proximoNivelTypeId}
                   onChange={e => setProximoNivelTypeId(e.target.value)}
@@ -1327,6 +1339,66 @@ export default function NotificationTemplatesManager({
                 </select>
                 <p className="text-[10px] text-gray-400 leading-normal mt-1">
                   Selecione a notificação superior na hierarquia. Quando o limite acima for alcançado, o motor buscará esta configuração para sugerir a alternativa automaticamente.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Rule 4: Delayed Assay rule */}
+          <div className="bg-[#f5f5f0]/30 border border-[#e5e5e0] rounded-3xl p-5 space-y-4">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-[#5A5A40] border-b border-[#e5e5e0]/70 pb-2 flex items-center justify-between">
+              <span>4. Regra de Atraso na Entrega de Ensaios</span>
+              <span className="text-[10px] lowercase text-[#5A5A40]/40 font-mono">(atraso administrativo)</span>
+            </h4>
+
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
+              <div className="md:col-span-4 bg-white p-4 rounded-2xl border border-[#e5e5e0] flex items-start gap-3">
+                <input 
+                  type="checkbox" 
+                  checked={regraAtrasoAtiva}
+                  onChange={e => setRegraAtrasoAtiva(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 rounded text-[#5A5A40] border-gray-300 focus:ring-[#5A5A40]/20"
+                />
+                <div>
+                  <span className="text-xs font-bold text-gray-800 block">Ativar Regra de Atraso</span>
+                  <span className="text-[10px] text-gray-400 leading-snug block mt-0.5">Associa o atraso na entrega de ensaios ao motivo escolhido no desvio</span>
+                </div>
+              </div>
+
+              <div className="md:col-span-4 space-y-1.5 bg-white p-4 rounded-2xl border border-[#e5e5e0]">
+                <label className="text-[10px] font-bold uppercase text-[#5A5A40]/70 text-gray-800 font-bold block mb-1">Motivo de Não-Conformidade Vinculado</label>
+                <select 
+                  disabled={!regraAtrasoAtiva}
+                  value={regraAtrasoNcId}
+                  onChange={e => setRegraAtrasoNcId(e.target.value)}
+                  className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs font-semibold text-[#5A5A40] focus:ring-2 focus:ring-[#5A5A40]/20 disabled:opacity-50"
+                >
+                  <option value="">Qualquer desvio (Vinculado Geral)</option>
+                  {nonConformitiesConfigs.map(c => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-gray-400 leading-normal mt-1">
+                  Selecione o motivo de não-conformidade que será automaticamente ativado quando um lote contiver a opção "ensaio entregue fora do prazo" assinalada.
+                </p>
+              </div>
+
+              <div className="md:col-span-4 space-y-1.5 bg-white p-4 rounded-2xl border border-[#e5e5e0]">
+                <label className="text-[10px] font-bold uppercase text-[#5A5A40]/70 text-gray-800 font-bold block mb-1">Limite de Repetições do Mesmo Tipo (Parâmetro X)</label>
+                <div className="relative">
+                  <input 
+                    type="number" 
+                    min="1" 
+                    max="50"
+                    disabled={!regraAtrasoAtiva}
+                    value={regraAtrasoLimiteRepeticoes}
+                    onChange={e => setRegraAtrasoLimiteRepeticoes(Number(e.target.value))}
+                    className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs font-mono font-bold text-gray-800 focus:ring-2 focus:ring-[#5A5A40]/20 disabled:opacity-50"
+                  />
+                  <span className="absolute right-3 top-3.5 text-[10px] uppercase font-bold text-gray-400">Vezes</span>
+                </div>
+                <p className="text-[10px] text-gray-400 leading-normal mt-1">
+                  Define o parâmetro X limite de repetições. O sistema conta as notificações deste tipo emitidas para o histórico consolidado.
                 </p>
               </div>
             </div>

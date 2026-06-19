@@ -232,13 +232,24 @@ export default function NotificationsPanel({
     const vBatches = pac.batches.filter((vb: any) => isWithinMonths(vb.periodoFinal, ruleValidadeMeses));
 
     const countPlatesForNc = (batch: any, ncId: string): number => {
-      if (!batch || !batch.nonConformities) return 0;
       let c = 0;
-      batch.nonConformities.forEach((nc: any) => {
-        if (!ncId || nc.nao_conformidade_id === ncId) {
-          c += (nc.placas || []).length;
+      if (batch && batch.nonConformities) {
+        batch.nonConformities.forEach((nc: any) => {
+          if (!ncId || nc.nao_conformidade_id === ncId) {
+            c += (nc.placas || []).length;
+          }
+        });
+      }
+
+      // 4. Regra de atraso na entrega de ensaios:
+      // If the delay rule is enabled, the batch is marked as delivered out of deadline,
+      // and we are evaluating either any desvio (ncId is empty) or the specifically linked desvio reason:
+      if (rule.regraAtraso_ativa && batch && (batch.ensaioForaDoPrazo === true || batch.ensaioForaDoPrazo === 'true')) {
+        if (!ncId || (rule.regraAtraso_ncId && ncId === rule.regraAtraso_ncId)) {
+          // Add 1 virtual non-conformity occurrence for this delay desvio
+          c += 1;
         }
-      });
+      }
       return c;
     };
 
@@ -304,7 +315,13 @@ export default function NotificationsPanel({
       n.notification_type_id === ruleType.id
     ).length;
 
-    if (sameTypeGeneratedCount >= (rule.limiteNotificacoes || 2)) {
+    // Use specialized repetition limit check for delay rule if triggered by delay
+    const isDelayActive = rule.regraAtraso_ativa && loteAtual && (loteAtual.ensaioForaDoPrazo === true || loteAtual.ensaioForaDoPrazo === 'true');
+    const effectiveLimit = isDelayActive
+      ? (rule.regraAtraso_limiteRepeticoes ?? rule.limiteNotificacoes ?? 2)
+      : (rule.limiteNotificacoes ?? 2);
+
+    if (sameTypeGeneratedCount >= effectiveLimit) {
       if (rule.proximoNivel_typeId) {
         const nextType = notificationTypes.find(t => t.id === rule.proximoNivel_typeId);
         if (nextType) {
@@ -313,13 +330,13 @@ export default function NotificationsPanel({
             return {
               type: nextEval.type,
               isEscalated: true,
-              reason: `Limite de "${ruleType.name}" atingido (${sameTypeGeneratedCount}/${rule.limiteNotificacoes} emitidas). Escalonado para: "${nextEval.type.name}".`
+              reason: `Limite de "${ruleType.name}" atingido (${sameTypeGeneratedCount}/${effectiveLimit} emitidas). Escalonado para: "${nextEval.type.name}".`
             };
           } else {
             return {
               type: nextType,
               isEscalated: true,
-              reason: `Limite de "${ruleType.name}" atingido (${sameTypeGeneratedCount}/${rule.limiteNotificacoes} emitidas). Sugerido próximo nível: "${nextType.name}".`
+              reason: `Limite de "${ruleType.name}" atingido (${sameTypeGeneratedCount}/${effectiveLimit} emitidas). Sugerido próximo nível: "${nextType.name}".`
             };
           }
         }
@@ -436,6 +453,9 @@ export default function NotificationsPanel({
           nonConformingPlates.push(`${p.trim().toUpperCase()} (${nc.nao_conformidade_name})`);
         });
       });
+      if (b.ensaioForaDoPrazo === true || b.ensaioForaDoPrazo === 'true') {
+        groundsUnique.add(`Atraso na entrega de ensaios (Período: ${formatDateShort(b.periodoInicial)} a ${formatDateShort(b.periodoFinal)} | Nº de ensaios: ${b.numEnsaios || 0})`);
+      }
     });
 
     const errosEncontrados = nonConformingPlates.length;
@@ -1266,11 +1286,25 @@ export default function NotificationsPanel({
               {selectedBatchForDetails.ensaioForaDoPrazo && (
                 <div className="p-4 bg-amber-50 rounded-2xl border border-amber-200 text-amber-900 flex items-start gap-2.5">
                   <Sparkles size={16} className="text-amber-600 shrink-0 mt-0.5" />
-                  <div className="space-y-0.5 text-left">
+                  <div className="space-y-1 text-left w-full">
                     <p className="text-xs font-bold uppercase tracking-wide">Entrega realizada fora do prazo</p>
                     <p className="text-[11px] text-amber-800 leading-normal">
                       Este lote foi expressamente assinalado como "ensaio fora do prazo" durante a conferência, caracterizando uma irregularidade administrativa aplicável para fins de notificação.
                     </p>
+                    <div className="mt-2 pt-2 border-t border-amber-200/50 grid grid-cols-3 gap-2 text-[10px] font-bold text-amber-950 font-mono">
+                      <div>
+                        <div className="text-[8px] uppercase tracking-wider text-amber-800/70 font-sans font-semibold">Período Inicial</div>
+                        <div>{formatDateShort(selectedBatchForDetails.periodoInicial)}</div>
+                      </div>
+                      <div>
+                        <div className="text-[8px] uppercase tracking-wider text-amber-800/70 font-sans font-semibold">Período Final</div>
+                        <div>{formatDateShort(selectedBatchForDetails.periodoFinal)}</div>
+                      </div>
+                      <div>
+                        <div className="text-[8px] uppercase tracking-wider text-amber-800/70 font-sans font-semibold">Nº de Ensaios</div>
+                        <div>{selectedBatchForDetails.numEnsaios || 0}</div>
+                      </div>
+                    </div>
                   </div>
                 </div>
               )}
@@ -1366,11 +1400,21 @@ export default function NotificationsPanel({
                 {/* Covered Batches Summary info */}
                 <div className="space-y-2 bg-[#f5f5f0]/50 p-4 rounded-xl border border-[#e5e5e0]/50">
                   <span className="text-[10px] font-bold uppercase text-gray-500">Lotes Abrangidos por esta Notificação:</span>
-                  <div className="space-y-1 mt-1 text-xs text-[#5A5A40]">
+                  <div className="space-y-2 mt-1 text-xs text-[#5A5A40]">
                     {generatingForPac.batches.map((b: any, index: number) => (
-                      <div key={b.id || index} className="flex justify-between font-mono">
-                        <span>Lote ({formatDateShort(b.periodoInicial)} - {formatDateShort(b.periodoFinal)})</span>
-                        <span className="font-bold text-red-600">{getNonConconformitiesCount(b.nonConformities)} Não-Conformidades</span>
+                      <div key={b.id || index} className="flex flex-col gap-1 py-1.5 border-b border-gray-250/20 last:border-0 font-mono">
+                        <div className="flex justify-between">
+                          <span>Lote ({formatDateShort(b.periodoInicial)} - {formatDateShort(b.periodoFinal)})</span>
+                          <span className="font-bold text-red-600">{getNonConconformitiesCount(b.nonConformities)} Não-Conformidades</span>
+                        </div>
+                        {(b.ensaioForaDoPrazo === true || b.ensaioForaDoPrazo === 'true') && (
+                          <div className="text-[10px] bg-amber-50 text-amber-800 px-2.5 py-1.5 rounded-xl border border-amber-200/50 flex flex-col sm:flex-row sm:items-center justify-between gap-1 mt-1">
+                            <span className="font-bold flex items-center gap-1">⚠️ Ensaio fora do prazo</span>
+                            <span className="font-sans font-semibold text-[9px] uppercase bg-white px-2 py-0.5 rounded-md border border-amber-200 shadow-xs">
+                              Início: {formatDateShort(b.periodoInicial)} | Fim: {formatDateShort(b.periodoFinal)} | Ensaios: {b.numEnsaios || 0}
+                            </span>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
