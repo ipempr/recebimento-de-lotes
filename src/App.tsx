@@ -367,8 +367,8 @@ export default function App() {
   const defaultDashStart = useMemo(() => format(new Date(new Date().getFullYear(), new Date().getMonth(), 1), 'yyyy-MM-dd'), []);
   const defaultDashEnd = useMemo(() => format(new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0), 'yyyy-MM-dd'), []);
 
-  const [dashStartDate, setDashStartDate] = useState<string>(defaultDashStart);
-  const [dashEndDate, setDashEndDate] = useState<string>(defaultDashEnd);
+  const [dashStartDate, setDashStartDate] = useState<string>('');
+  const [dashEndDate, setDashEndDate] = useState<string>('');
 
   // Error Handler
   const handleFirestoreError = (error: unknown, operationType: OperationType, path: string | null) => {
