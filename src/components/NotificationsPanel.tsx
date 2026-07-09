@@ -243,11 +243,15 @@ export default function NotificationsPanel({
 
       // 4. Regra de atraso na entrega de ensaios:
       // If the delay rule is enabled, the batch is marked as delivered out of deadline,
-      // and we are evaluating either any desvio (ncId is empty) or the specifically linked desvio reason:
+      // and we have at least the minimum number of late batches (rule.regraAtraso_limiteRepeticoes):
       if (rule.regraAtraso_ativa && batch && (batch.ensaioForaDoPrazo === true || batch.ensaioForaDoPrazo === 'true')) {
-        if (!ncId || (rule.regraAtraso_ncId && ncId === rule.regraAtraso_ncId)) {
-          // Add 1 virtual non-conformity occurrence for this delay desvio
-          c += 1;
+        const totalLate = vBatches.filter((vb: any) => vb.ensaioForaDoPrazo === true || vb.ensaioForaDoPrazo === 'true').length;
+        const requiredMinRepetitions = rule.regraAtraso_limiteRepeticoes ?? 4;
+        if (totalLate >= requiredMinRepetitions) {
+          if (!ncId || (rule.regraAtraso_ncId && ncId === rule.regraAtraso_ncId)) {
+            // Add 1 virtual non-conformity occurrence for this delay desvio
+            c += 1;
+          }
         }
       }
       return c;
@@ -421,7 +425,7 @@ export default function NotificationsPanel({
         processHeader: `Processo IPEM-PR 52603.000007/2026-31\nde ${formatDateShort(item.createdAt || new Date())}.`,
         intro: 'O Instituto de Pesos e Medidas do Paraná - IPEM-PR abriu um processo administrativo contra:',
         sections: [
-          { id: '1', icon: 'search', title: 'MOTIVO', content: 'Identificamos a(s) irregularidade(s) descrita(s) no auto de infração em anexo.\nNúmero do Auto de Infração: 3218663\n\nNo lote analisado, composto de {total_ensaios} ensaios, identificamos {erros_encontrados} desvios, o que corresponde a um percentual de irregularidade de {percentual_erro}%.\n\nRelação de placas com não-conformidades encontradas:\n{placas_nao_conformes}' },
+          { id: '1', icon: 'search', title: 'MOTIVO', content: 'Identificamos irregularidades técnicas ou administrativas nos lotes sob vossa responsabilidade:\n\nRelação de Lotes Envolvidos:\n{lotes_detalhes}\n\nNo total acumulado, composto de {total_ensaios} ensaios, identificamos {erros_encontrados} desvios, o que corresponde a um percentual de irregularidade de {percentual_erro}%.\n\nRelação de placas com não-conformidades encontradas:\n{placas_nao_conformes}' },
           { id: '2', icon: 'check-square', title: 'COMO SE DEFENDER?', content: 'Você poderá apresentar a defesa por escrito em até 10(dez) dias, contados da data de recebimento desta notificação. Na defesa, informe:\n\n1. Nome do órgão que o notificou: IPEM-PR;\n2. Nome, CPF/CNPJ e assinatura;\n3. Número do Processo e do(s) Auto(s) de Infração;\n4. Motivo da defesa detalhado.' },
           { id: '3', icon: 'alert-triangle', title: 'IMPORTANTE', content: 'Você deve enviar uma cópia do seu documento de identificação oficial junto com a defesa. E se você estiver representado por procurador legal, não esqueça de encaminhar a procuração.' },
           { id: '4', icon: 'send', title: 'PARA ONDE ENVIAR?', content: 'Envie sua defesa para o IPEM-PR, localizado em Curitiba, na Rua Estados Unidos, 1354, bairro Bacacheri, CEP 82510-050.' },
@@ -429,11 +433,11 @@ export default function NotificationsPanel({
         ]
       },
       email: {
-        subject: 'Notificação Urgente de Irregularidade - PAC {pac_nome}',
-        body: 'Prezados,\n\nConstatamos não-conformidades técnicas nos lotes do PAC {pac_nome}.\n\n{motivo_detalhes}\n\nReiteramos que o percentual de falhas detectadas foi de {percentual_erro}%. Verifique as instruções abaixo para apresentar a defesa prévia em até 10 dias corridos.\n\nAtenciosamente,\nIPEM-PR.'
+        subject: 'Notificação Urgente de Irregularidade - {razao_social}',
+        body: 'Prezados,\n\nConstatamos não-conformidades nos lotes da empresa {razao_social}.\n\nDetalhes dos Lotes Envolvidos:\n{lotes_detalhes}\n\nEnquadramento Legal:\n{motivo_detalhes}\n\nReiteramos que o percentual de falhas detectadas foi de {percentual_erro}%. Verifique as instruções abaixo para apresentar a defesa prévia em até 10 dias corridos.\n\nAtenciosamente,\nIPEM-PR.'
       },
       whatsapp: {
-        template: '⚠️ *NOTIFICAÇÃO DE AUTUAÇÃO - IPEM-PR*\n\nInformamos que foi aberto o processo administrativo para o *PAC {pac_nome}* devido a desvios encontrados nos ensaios.\n\n*Índice de Irregularidades:* {percentual_erro}% ({erros_encontrados} falhas de {total_ensaios} ensaios).\n\n📄 *Placas Não-Conformes:* \n{placas_nao_conformes}\n\n⚖️ *Como se defender?*\nVocê possui até 10 dias úteis para apresentar recurso formalizado por escrito para o IPEM-PR, contendo justificativas, documento de identificação e procuração (caso aplicável).\n\nDúvidas: ouvidoria@ipem.pr.gov.br ou (41) 3251-2200.'
+        template: '⚠️ *NOTIFICAÇÃO DE AUTUAÇÃO - IPEM-PR*\n\nInformamos que foi aberto o processo administrativo para a empresa *{razao_social}* devido a desvios e atrasos encontrados nos ensaios.\n\n📦 *Lotes Envolvidos:*\n{lotes_detalhes}\n\n*Índice de Irregularidades:* {percentual_erro}% ({erros_encontrados} desvios de {total_ensaios} ensaios).\n\n📄 *Placas Não-Conformes:* \n{placas_nao_conformes}\n\n⚖️ *Como se defender?*\nVocê possui até 10 dias úteis para apresentar recurso formalizado por escrito para o IPEM-PR, contendo justificativas, documento de identificação e procuração (caso aplicável).\n\nDúvidas: ouvidoria@ipem.pr.gov.br ou (41) 3251-2200.'
       }
     };
 
@@ -444,6 +448,25 @@ export default function NotificationsPanel({
     const nonConformingPlates: string[] = [];
     const groundsUnique = new Set<string>();
 
+    const formatDate = (ts: any) => {
+      if (!ts) return 'N/A';
+      if (typeof ts.toDate === 'function') {
+        return ts.toDate().toLocaleDateString('pt-BR');
+      }
+      if (ts instanceof Date) {
+        return ts.toLocaleDateString('pt-BR');
+      }
+      if (ts.seconds) {
+        return new Date(ts.seconds * 1000).toLocaleDateString('pt-BR');
+      }
+      if (typeof ts === 'string' || typeof ts === 'number') {
+        return new Date(ts).toLocaleDateString('pt-BR');
+      }
+      return 'N/A';
+    };
+
+    const lotesList: string[] = [];
+
     fullBatches.forEach(b => {
       totalEnsaios += (b.numEnsaios || 0);
       const ncs = b.nonConformities || [];
@@ -453,10 +476,55 @@ export default function NotificationsPanel({
           nonConformingPlates.push(`${p.trim().toUpperCase()} (${nc.nao_conformidade_name})`);
         });
       });
-      if (b.ensaioForaDoPrazo === true || b.ensaioForaDoPrazo === 'true') {
-        groundsUnique.add(`Atraso na entrega de ensaios (Período: ${formatDateShort(b.periodoInicial)} a ${formatDateShort(b.periodoFinal)} | Nº de ensaios: ${b.numEnsaios || 0})`);
+
+      const isAtrasado = b.ensaioForaDoPrazo === true || b.ensaioForaDoPrazo === 'true';
+      if (isAtrasado) {
+        groundsUnique.add(`Atraso na entrega de ensaios (Período: ${formatDate(b.periodoInicial)} a ${formatDate(b.periodoFinal)} | Nº de ensaios: ${b.numEnsaios || 0})`);
+      }
+
+      const isIrregular = isAtrasado || ncs.length > 0;
+      if (isIrregular) {
+        const pInicial = formatDate(b.periodoInicial);
+        const pFinal = formatDate(b.periodoFinal);
+        const dataRecebimento = formatDate(b.recebidoEm);
+        const nEnsaios = b.numEnsaios || 0;
+
+        let situacaoDet = '';
+        if (isAtrasado) {
+          situacaoDet = 'Entrega fora do prazo (Irregularidade administrativa no conjunto do lote)';
+        }
+        if (ncs.length > 0) {
+          const platesList: string[] = [];
+          ncs.forEach((nc: any) => {
+            if (nc.placas && nc.placas.length > 0) {
+              platesList.push(`${nc.nao_conformidade_name} (Placas: ${nc.placas.join(', ').toUpperCase()})`);
+            } else {
+              platesList.push(`${nc.nao_conformidade_name}`);
+            }
+          });
+          const platesStr = platesList.join('; ');
+          situacaoDet = situacaoDet 
+            ? `${situacaoDet} e desvios técnicos: ${platesStr}`
+            : `Desvios técnicos detectados: ${platesStr}`;
+        }
+
+        lotesList.push(
+          `• Lote de Referência: ${b.id}\n` +
+          `  - Período do Lote: ${pInicial} a ${pFinal}\n` +
+          `  - Número de Ensaios do Lote: ${nEnsaios}\n` +
+          `  - Data do Recebimento do Lote: ${dataRecebimento}\n` +
+          `  - Descrição da Irregularidade: ${situacaoDet}`
+        );
       }
     });
+
+    const lotesDetalhesString = lotesList.length > 0 
+      ? lotesList.join('\n\n') 
+      : '(Nenhum lote irregular ou entregue fora do prazo foi identificado para este PAC)';
+
+    const pacObj = pacs.find(p => p.id === item.pac_id || p.name === item.pac_name);
+    const pacRazaoSocial = pacObj ? pacObj.name : (item.pac_name || '');
+    const pacCNPJ = pacObj ? pacObj.cnpj : '02.943.486/0001-70';
 
     const errosEncontrados = nonConformingPlates.length;
     const percentualErro = totalEnsaios > 0 ? ((errosEncontrados / totalEnsaios) * 100).toFixed(2) : '0.00';
@@ -466,13 +534,15 @@ export default function NotificationsPanel({
     const compilePlaceholders = (text: string) => {
       if (!text) return '';
       return text
-        .replace(/{pac_nome}/g, item.pac_name || '')
-        .replace(/{cnpj}/g, '02.943.486/0001-70')
+        .replace(/{pac_name}/g, item.pac_name || '')
+        .replace(/{razao_social}/g, pacRazaoSocial)
+        .replace(/{cnpj}/g, pacCNPJ)
         .replace(/{total_ensaios}/g, String(totalEnsaios))
         .replace(/{erros_encontrados}/g, String(errosEncontrados))
         .replace(/{percentual_erro}/g, percentualErro)
         .replace(/{placas_nao_conformes}/g, platesJoinedFormatted)
         .replace(/{motivo_detalhes}/g, reasonsJoinedFormatted)
+        .replace(/{lotes_detalhes}/g, lotesDetalhesString)
         .replace(/{data_atual}/g, formatDateShort(item.createdAt || new Date()));
     };
 

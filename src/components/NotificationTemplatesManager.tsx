@@ -59,6 +59,7 @@ interface NotificationTemplatesManagerProps {
   handleFirestoreError: (err: any, op: string, col: string) => void;
   batches: any[];
   pacs: any[];
+  setPacs?: React.Dispatch<React.SetStateAction<any[]>>;
   nonConformityRecords: any[];
   nonConformitiesConfigs: any[];
   logoUrl?: string;
@@ -72,6 +73,7 @@ export default function NotificationTemplatesManager({
   handleFirestoreError,
   batches,
   pacs,
+  setPacs,
   nonConformityRecords,
   nonConformitiesConfigs,
   logoUrl = '',
@@ -82,23 +84,45 @@ export default function NotificationTemplatesManager({
   const [activeChannel, setActiveChannel] = useState<'oficio' | 'email' | 'whatsapp'>('oficio');
   const [selectedPacId, setSelectedPacId] = useState<string>('sample-pac');
   
+  // PAC Inline Editing states
+  const [pacEditName, setPacEditName] = useState('');
+  const [pacEditRazaoSocial, setPacEditRazaoSocial] = useState('');
+  const [pacEditCnpj, setPacEditCnpj] = useState('');
+  const [isSavingPac, setIsSavingPac] = useState(false);
+  const [pacSaveSuccess, setPacSaveSuccess] = useState(false);
+
+  useEffect(() => {
+    if (selectedPacId === 'sample-pac') {
+      setPacEditName('SEA METALÚRGICA');
+      setPacEditRazaoSocial('SEA METALÚRGICA LTDA');
+      setPacEditCnpj('02.943.486/0001-70');
+    } else {
+      const pacObj = pacs.find(p => p.id === selectedPacId || p.name === selectedPacId);
+      if (pacObj) {
+        setPacEditName(pacObj.name || '');
+        setPacEditRazaoSocial(pacObj.razaoSocial || pacObj.name || '');
+        setPacEditCnpj(pacObj.cnpj || '');
+      }
+    }
+  }, [selectedPacId, pacs]);
+
   // Local template editor states
   const [oficioTitle, setOficioTitle] = useState('NOTIFICAÇÃO DE AUTUAÇÃO');
   const [oficioSignatureId, setOficioSignatureId] = useState<string>('');
   const [oficioProcessHeader, setOficioProcessHeader] = useState('Processo IPEM-PR 52603.000007/2026-31\nde 02 de julho de 2026.');
   const [oficioIntro, setOficioIntro] = useState('O Instituto de Pesos e Medidas do Paraná - IPEM-PR abriu um processo administrativo contra:');
   const [oficioSections, setOficioSections] = useState<any[]>([
-    { id: '1', icon: 'search', title: 'MOTIVO', content: 'Identificamos a(s) irregularidade(s) descrita(s) no auto de infração em anexo.\nNúmero do Auto de Infração: 3218663\n\nNo lote analisado, composto de {total_ensaios} ensaios, identificamos {erros_encontrados} desvios, o que corresponde a um percentual de irregularidade de {percentual_erro}%.\n\nRelação de placas com não-conformidades encontradas:\n{placas_nao_conformes}' },
-    { id: '2', icon: 'check-square', title: 'COMO SE DEFENDER?', content: 'Você poderá apresentar a defesa por escrito em até 10(dez) dias, contados da data de recebimento desta notificação. Na defesa, informe:\n\n1. Nome do órgão que o notificou: IPEM-PR;\n2. Nome, CPF/CNPJ and assinatura;\n3. Número do Processo e do(s) Auto(s) de Infração;\n4. Motivo da defesa detalhado.' },
+    { id: '1', icon: 'search', title: 'MOTIVO', content: 'Identificamos irregularidades técnicas ou administrativas nos lotes sob vossa responsabilidade:\n\nRelação de Lotes Envolvidos:\n{lotes_detalhes}\n\nNo total acumulado, composto de {total_ensaios} ensaios, identificamos {erros_encontrados} desvios, o que corresponde a um percentual de irregularidade de {percentual_erro}%.\n\nRelação de placas com não-conformidades encontradas:\n{placas_nao_conformes}' },
+    { id: '2', icon: 'check-square', title: 'COMO SE DEFENDER?', content: 'Você poderá apresentar a defesa por escrito em até 10(dez) dias, contados da data de recebimento desta notificação. Na defesa, informe:\n\n1. Nome do órgão que o notificou: IPEM-PR;\n2. Nome, CPF/CNPJ e assinatura;\n3. Número do Processo e do(s) Auto(s) de Infração;\n4. Motivo da defesa detalhado.' },
     { id: '3', icon: 'alert-triangle', title: 'IMPORTANTE', content: 'Você deve enviar uma cópia do seu documento de identificação oficial junto com a defesa. E se você estiver representado por procurador legal, não esqueça de encaminhar a procuração.' },
     { id: '4', icon: 'send', title: 'PARA ONDE ENVIAR?', content: 'Envie sua defesa para o IPEM-PR, localizado em Curitiba, na Rua Estados Unidos, 1354, bairro Bacacheri, CEP 82510-050.' },
     { id: '5', icon: 'help-circle', title: 'DÚVIDAS?', content: 'Envie e-mail para ouvidoria@ipem.pr.gov.br ou entre em contato pelo telefone (41) 3251-2200.' }
   ]);
 
-  const [emailSubject, setEmailSubject] = useState('Notificação Urgente de Irregularidade - PAC {pac_nome}');
-  const [emailBody, setEmailBody] = useState('Prezados,\n\nConstatamos não-conformidades técnicas nos lotes do PAC {pac_nome}.\n\n{motivo_detalhes}\n\nReiteramos que o percentual de falhas detectadas foi de {percentual_erro}%. Verifique as instruções abaixo para apresentar a defesa prévia em até 10 dias corridos.\n\nAtenciosamente,\nIPEM-PR.');
+  const [emailSubject, setEmailSubject] = useState('Notificação Urgente de Irregularidade - {razao_social}');
+  const [emailBody, setEmailBody] = useState('Prezados,\n\nConstatamos não-conformidades nos lotes da empresa {razao_social}.\n\nDetalhes dos Lotes Envolvidos:\n{lotes_detalhes}\n\nEnquadramento Legal:\n{motivo_detalhes}\n\nReiteramos que o percentual de falhas detectadas foi de {percentual_erro}%. Verifique as instruções abaixo para apresentar a defesa prévia em até 10 dias corridos.\n\nAtenciosamente,\nIPEM-PR.');
 
-  const [whatsappTemplate, setWhatsappTemplate] = useState('⚠️ *NOTIFICAÇÃO DE AUTUAÇÃO - IPEM-PR*\n\nInformamos que foi aberto o processo administrativo para o *PAC {pac_nome}* devido a desvios encontrados nos ensaios.\n\n*Índice de Irregularidades:* {percentual_erro}% ({erros_encontrados} falhas de {total_ensaios} ensaios).\n\n📄 *Placas Não-Conformes:* \n{placas_nao_conformes}\n\n⚖️ *Como se defender?*\nVocê possui até 10 dias úteis para apresentar recurso formalizado por escrito para o IPEM-PR, contendo justificativas, documento de identificação e procuração (caso aplicável).\n\nDúvidas: ouvidoria@ipem.pr.gov.br ou (41) 3251-2200.');
+  const [whatsappTemplate, setWhatsappTemplate] = useState('⚠️ *NOTIFICAÇÃO DE AUTUAÇÃO - IPEM-PR*\n\nInformamos que foi aberto o processo administrativo para a empresa *{razao_social}* devido a desvios e atrasos encontrados nos ensaios.\n\n📦 *Lotes Envolvidos:*\n{lotes_detalhes}\n\n*Índice de Irregularidades:* {percentual_erro}% ({erros_encontrados} desvios de {total_ensaios} ensaios).\n\n📄 *Placas Não-Conformes:* \n{placas_nao_conformes}\n\n⚖️ *Como se defender?*\nVocê possui até 10 dias úteis para apresentar recurso formalizado por escrito para o IPEM-PR, contendo justificativas, documento de identificação e procuração (caso aplicável).\n\nDúvidas: ouvidoria@ipem.pr.gov.br ou (41) 3251-2200.');
 
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -118,9 +142,68 @@ export default function NotificationTemplatesManager({
   const [proximoNivelTypeId, setProximoNivelTypeId] = useState('');
   const [regraAtrasoAtiva, setRegraAtrasoAtiva] = useState(false);
   const [regraAtrasoNcId, setRegraAtrasoNcId] = useState('');
-  const [regraAtrasoLimiteRepeticoes, setRegraAtrasoLimiteRepeticoes] = useState(2);
+  const [regraAtrasoLimiteRepeticoes, setRegraAtrasoLimiteRepeticoes] = useState(4);
   const [isSavingRule, setIsSavingRule] = useState(false);
   const [saveRuleSuccess, setSaveRuleSuccess] = useState(false);
+
+  // Helper for formatting CNPJ
+  const formatCNPJ = (value: string) => {
+    const digits = value.replace(/\D/g, '').substring(0, 14);
+    let res = digits;
+    if (digits.length > 12) {
+      res = `${digits.substring(0, 2)}.${digits.substring(2, 5)}.${digits.substring(5, 8)}/${digits.substring(8, 12)}-${digits.substring(12)}`;
+    } else if (digits.length > 8) {
+      res = `${digits.substring(0, 2)}.${digits.substring(2, 5)}.${digits.substring(5, 8)}/${digits.substring(8)}`;
+    } else if (digits.length > 5) {
+      res = `${digits.substring(0, 2)}.${digits.substring(2, 5)}.${digits.substring(5)}`;
+    } else if (digits.length > 2) {
+      res = `${digits.substring(0, 2)}.${digits.substring(2)}`;
+    }
+    return res;
+  };
+
+  const handleSavePacInline = async () => {
+    if (!selectedPacId || selectedPacId === 'sample-pac') return;
+    setIsSavingPac(true);
+    setPacSaveSuccess(false);
+
+    try {
+      if (isLocalMode) {
+        if (setPacs) {
+          const updated = pacs.map(p => 
+            (p.id === selectedPacId || p.name === selectedPacId)
+              ? { ...p, name: pacEditName, razaoSocial: pacEditRazaoSocial, cnpj: pacEditCnpj }
+              : p
+          ).sort((a, b) => a.name.localeCompare(b.name));
+          setPacs(updated);
+          localStorage.setItem('lotes_pacs', JSON.stringify(updated));
+        }
+      } else {
+        const pacObj = pacs.find(p => p.id === selectedPacId || p.name === selectedPacId);
+        if (pacObj && pacObj.id) {
+          await updateDoc(doc(db, 'pacs', pacObj.id), {
+            name: pacEditName,
+            razaoSocial: pacEditRazaoSocial,
+            cnpj: pacEditCnpj
+          });
+          if (setPacs) {
+            const updated = pacs.map(p => 
+              p.id === pacObj.id
+                ? { ...p, name: pacEditName, razaoSocial: pacEditRazaoSocial, cnpj: pacEditCnpj }
+                : p
+            );
+            setPacs(updated);
+          }
+        }
+      }
+      setPacSaveSuccess(true);
+      setTimeout(() => setPacSaveSuccess(false), 3000);
+    } catch (e: any) {
+      handleFirestoreError(e, 'update', `pacs/${selectedPacId}`);
+    } finally {
+      setIsSavingPac(false);
+    }
+  };
 
   // Load selected template values and rule values
   useEffect(() => {
@@ -166,7 +249,7 @@ export default function NotificationTemplatesManager({
           setProximoNivelTypeId(r.proximoNivel_typeId ?? '');
           setRegraAtrasoAtiva(r.regraAtraso_ativa ?? false);
           setRegraAtrasoNcId(r.regraAtraso_ncId ?? '');
-          setRegraAtrasoLimiteRepeticoes(r.regraAtraso_limiteRepeticoes ?? 2);
+          setRegraAtrasoLimiteRepeticoes(r.regraAtraso_limiteRepeticoes ?? 4);
         } else {
           resetRulesToDefault();
         }
@@ -179,15 +262,15 @@ export default function NotificationTemplatesManager({
     setOficioProcessHeader('Processo IPEM-PR 52603.000007/2026-31\nde 02 de julho de 2026.');
     setOficioIntro('O Instituto de Pesos e Medidas do Paraná - IPEM-PR abriu um processo administrativo contra:');
     setOficioSections([
-      { id: '1', icon: 'search', title: 'MOTIVO', content: 'Identificamos a(s) irregularidade(s) descrita(s) no auto de infração em anexo.\nNúmero do Auto de Infração: 3218663\n\nNo lote analisado, composto de {total_ensaios} ensaios, identificamos {erros_encontrados} desvios, o que corresponde a um percentual de irregularidade de {percentual_erro}%.\n\nRelação de placas com não-conformidades encontradas:\n{placas_nao_conformes}' },
+      { id: '1', icon: 'search', title: 'MOTIVO', content: 'Identificamos irregularidades técnicas ou administrativas nos lotes sob vossa responsabilidade:\n\nRelação de Lotes Envolvidos:\n{lotes_detalhes}\n\nNo total acumulado, composto de {total_ensaios} ensaios, identificamos {erros_encontrados} desvios, o que corresponde a um percentual de irregularidade de {percentual_erro}%.\n\nRelação de placas com não-conformidades encontradas:\n{placas_nao_conformes}' },
       { id: '2', icon: 'check-square', title: 'COMO SE DEFENDER?', content: 'Você poderá apresentar a defesa por escrito em até 10(dez) dias, contados da data de recebimento desta notificação. Na defesa, informe:\n\n1. Nome do órgão que o notificou: IPEM-PR;\n2. Nome, CPF/CNPJ e assinatura;\n3. Número do Processo e do(s) Auto(s) de Infração;\n4. Motivo da defesa detalhado.' },
       { id: '3', icon: 'alert-triangle', title: 'IMPORTANTE', content: 'Você deve enviar uma cópia do seu documento de identificação oficial junto com a defesa. E se você estiver representado por procurador legal, não esqueça de encaminhar a procuração.' },
       { id: '4', icon: 'send', title: 'PARA ONDE ENVIAR?', content: 'Envie sua defesa para o IPEM-PR, localizado em Curitiba, na Rua Estados Unidos, 1354, bairro Bacacheri, CEP 82510-050.' },
       { id: '5', icon: 'help-circle', title: 'DÚVIDAS?', content: 'Envie e-mail para ouvidoria@ipem.pr.gov.br ou entre em contato pelo telefone (41) 3251-2200.' }
     ]);
-    setEmailSubject('Notificação Urgente de Irregularidade - PAC {pac_nome}');
-    setEmailBody('Prezados,\n\nConstatamos não-conformidades técnicas nos lotes do PAC {pac_nome}.\n\n{motivo_detalhes}\n\nReiteramos que o percentual de falhas detectadas foi de {percentual_erro}%. Verifique as instruções abaixo para apresentar a defesa prévia em até 10 dias corridos.\n\nAtenciosamente,\nIPEM-PR.');
-    setWhatsappTemplate('⚠️ *NOTIFICAÇÃO DE AUTUAÇÃO - IPEM-PR*\n\nInformamos que foi aberto o processo administrativo para o *PAC {pac_nome}* devido a desvios encontrados nos ensaios.\n\n*Índice de Irregularidades:* {percentual_erro}% ({erros_encontrados} falhas de {total_ensaios} ensaios).\n\n📄 *Placas Não-Conformes:* \n{placas_nao_conformes}\n\n⚖️ *Como se defender?*\nVocê possui até 10 dias úteis para apresentar recurso formalizado por escrito para o IPEM-PR, contendo justificativas, documento de identificação e procuração (caso aplicável).\n\nDúvidas: ouvidoria@ipem.pr.gov.br ou (41) 3251-2200.');
+    setEmailSubject('Notificação Urgente de Irregularidade - {razao_social}');
+    setEmailBody('Prezados,\n\nConstatamos não-conformidades nos lotes da empresa {razao_social}.\n\nDetalhes dos Lotes Envolvidos:\n{lotes_detalhes}\n\nEnquadramento Legal:\n{motivo_detalhes}\n\nReiteramos que o percentual de falhas detectadas foi de {percentual_erro}%. Verifique as instruções abaixo para apresentar a defesa prévia em até 10 dias corridos.\n\nAtenciosamente,\nIPEM-PR.');
+    setWhatsappTemplate('⚠️ *NOTIFICAÇÃO DE AUTUAÇÃO - IPEM-PR*\n\nInformamos que foi aberto o processo administrativo para a empresa *{razao_social}* devido a desvios e atrasos encontrados nos ensaios.\n\n📦 *Lotes Envolvidos:*\n{lotes_detalhes}\n\n*Índice de Irregularidades:* {percentual_erro}% ({erros_encontrados} desvios de {total_ensaios} ensaios).\n\n📄 *Placas Não-Conformes:* \n{placas_nao_conformes}\n\n⚖️ *Como se defender?*\nVocê possui até 10 dias úteis para apresentar recurso formalizado por escrito para o IPEM-PR, contendo justificativas, documento de identificação e procuração (caso aplicável).\n\nDúvidas: ouvidoria@ipem.pr.gov.br ou (41) 3251-2200.');
     setOficioSignatureId('');
   };
 
@@ -205,7 +288,7 @@ export default function NotificationTemplatesManager({
     setProximoNivelTypeId('');
     setRegraAtrasoAtiva(false);
     setRegraAtrasoNcId('');
-    setRegraAtrasoLimiteRepeticoes(2);
+    setRegraAtrasoLimiteRepeticoes(4);
   };
 
   // Handle saving the edited rules properties
@@ -316,13 +399,15 @@ export default function NotificationTemplatesManager({
     if (selectedPacId === 'sample-pac') {
       return {
         pacName: 'SEA METALÚRGICA LTDA',
+        razaoSocial: 'SEA METALÚRGICA LTDA',
         cnpj: '02.943.486/0001-70',
         totalEnsaios: 15,
         errosEncontrados: 6,
         percentualErro: '40.00',
         placasNaoConformesList: 'ABC1C34 (Placa não cadastrada), XYZ9O87 (Lacre rompido), KKK4J12 (Placa não cadastrada)',
         enquadramentos: 'Artigo 12, item II da Portaria 48/INMETRO.',
-        processo: 'IMETRO-SC 52603.000007/2026-31'
+        processo: 'IMETRO-SC 52603.000007/2026-31',
+        lotesDetalhes: `• Lote de Referência: LOTE-SEA-091\n  - Período do Lote: 01/06/2026 a 10/06/2026\n  - Número de Ensaios do Lote: 8\n  - Data do Recebimento do Lote: 11/06/2026\n  - Descrição da Irregularidade: Desvios em placas: Placa não cadastrada (Placas: ABC1C34, KKK4J12); Lacre rompido (Placas: XYZ9O87)\n\n• Lote de Referência: LOTE-SEA-092\n  - Período do Lote: 11/06/2026 a 20/06/2026\n  - Número de Ensaios do Lote: 7\n  - Data do Recebimento do Lote: 25/06/2026\n  - Descrição da Irregularidade: Entrega fora do prazo (Irregularidade administrativa no conjunto do lote)`
       };
     }
 
@@ -330,13 +415,15 @@ export default function NotificationTemplatesManager({
     if (!pacObj) {
       return {
         pacName: 'PAC Desconhecido',
+        razaoSocial: 'PAC Desconhecido',
         cnpj: '00.000.000/0000-00',
         totalEnsaios: 0,
         errosEncontrados: 0,
         percentualErro: '0.00',
         placasNaoConformesList: '(Nenhuma placa não-conforme vinculada)',
         enquadramentos: 'Nenhum',
-        processo: 'IMETRO-SC'
+        processo: 'IMETRO-SC',
+        lotesDetalhes: '(Nenhum lote irregular)'
       };
     }
 
@@ -345,8 +432,26 @@ export default function NotificationTemplatesManager({
     let totalEnsaios = 0;
     const nonConformingPlates: string[] = [];
     const groundsUnique = new Set<string>();
+    const lotesList: string[] = [];
 
-    pacBatches.forEach(b => {
+    const formatDate = (ts: any) => {
+      if (!ts) return 'N/A';
+      if (typeof ts.toDate === 'function') {
+        return ts.toDate().toLocaleDateString('pt-BR');
+      }
+      if (ts instanceof Date) {
+        return ts.toLocaleDateString('pt-BR');
+      }
+      if (ts.seconds) {
+        return new Date(ts.seconds * 1000).toLocaleDateString('pt-BR');
+      }
+      if (typeof ts === 'string' || typeof ts === 'number') {
+        return new Date(ts).toLocaleDateString('pt-BR');
+      }
+      return 'N/A';
+    };
+
+    pacBatches.forEach((b, idx) => {
       totalEnsaios += (b.numEnsaios || 0);
       const ncs = isLocalMode 
         ? (b.nonConformities || []) 
@@ -367,20 +472,62 @@ export default function NotificationTemplatesManager({
           nonConformingPlates.push(`${p.trim().toUpperCase()} (${nc.nao_conformidade_name})`);
         });
       });
+
+      const isAtrasado = b.ensaioForaDoPrazo === true;
+      const isIrregular = isAtrasado || ncs.length > 0;
+
+      if (isIrregular) {
+        const pInicial = formatDate(b.periodoInicial);
+        const pFinal = formatDate(b.periodoFinal);
+        const dataRecebimento = formatDate(b.recebidoEm);
+        const nEnsaios = b.numEnsaios || 0;
+
+        let situacaoDet = '';
+        if (isAtrasado) {
+          situacaoDet = 'Entrega fora do prazo (Irregularidade administrativa no conjunto do lote)';
+        }
+        if (ncs.length > 0) {
+          const platesList: string[] = [];
+          ncs.forEach((nc: any) => {
+            if (nc.placas && nc.placas.length > 0) {
+              platesList.push(`${nc.nao_conformidade_name} (Placas: ${nc.placas.join(', ').toUpperCase()})`);
+            } else {
+              platesList.push(`${nc.nao_conformidade_name}`);
+            }
+          });
+          const platesStr = platesList.join('; ');
+          situacaoDet = situacaoDet 
+            ? `${situacaoDet} e desvios técnicos: ${platesStr}`
+            : `Desvios técnicos detectados: ${platesStr}`;
+        }
+
+        lotesList.push(
+          `• Lote de Referência: ${b.id}\n` +
+          `  - Período do Lote: ${pInicial} a ${pFinal}\n` +
+          `  - Número de Ensaios do Lote: ${nEnsaios}\n` +
+          `  - Data do Recebimento do Lote: ${dataRecebimento}\n` +
+          `  - Descrição da Irregularidade: ${situacaoDet}`
+        );
+      }
     });
 
     const totalErros = nonConformingPlates.length;
     const percent = totalEnsaios > 0 ? ((totalErros / totalEnsaios) * 100).toFixed(2) : '0.00';
+    const lotesDetalhesString = lotesList.length > 0 
+      ? lotesList.join('\n\n') 
+      : '(Nenhum lote irregular ou entregue fora do prazo foi identificado para este PAC)';
 
     return {
       pacName: pacObj.name,
+      razaoSocial: pacObj.razaoSocial || pacObj.name,
       cnpj: pacObj.cnpj || '02.943.486/0001-70', // mock if not present
       totalEnsaios,
       errosEncontrados: totalErros,
       percentualErro: percent,
       placasNaoConformesList: nonConformingPlates.join(', ') || '(Nenhuma placa encontrada)',
       enquadramentos: Array.from(groundsUnique).join(', ') || 'Sem enquadramentos',
-      processo: `IMETRO-SC 52603.000${selectedPacId.slice(-3) || '999'}/2026-31`
+      processo: `IMETRO-SC 52603.000${selectedPacId.slice(-3) || '999'}/2026-31`,
+      lotesDetalhes: lotesDetalhesString
     };
   };
 
@@ -391,12 +538,14 @@ export default function NotificationTemplatesManager({
     if (!text) return '';
     return text
       .replace(/{pac_nome}/g, metrics.pacName)
+      .replace(/{razao_social}/g, metrics.razaoSocial)
       .replace(/{cnpj}/g, metrics.cnpj)
       .replace(/{total_ensaios}/g, String(metrics.totalEnsaios))
       .replace(/{erros_encontrados}/g, String(metrics.errosEncontrados))
       .replace(/{percentual_erro}/g, metrics.percentualErro)
       .replace(/{placas_nao_conformes}/g, metrics.placasNaoConformesList)
       .replace(/{motivo_detalhes}/g, metrics.enquadramentos)
+      .replace(/{lotes_detalhes}/g, metrics.lotesDetalhes || '')
       .replace(/{data_atual}/g, new Date().toLocaleDateString('pt-BR'));
   };
 
@@ -610,7 +759,7 @@ export default function NotificationTemplatesManager({
           </div>
 
           <div class="target-box print-avoid-break">
-            <strong>EMPRESA NOTIFICADA:</strong> ${metrics.pacName}<br/>
+            <strong>EMPRESA NOTIFICADA:</strong> ${metrics.razaoSocial || metrics.pacName}<br/>
             <strong>CNPJ/ID:</strong> ${metrics.cnpj}
           </div>
 
@@ -733,19 +882,55 @@ export default function NotificationTemplatesManager({
             </div>
 
             {/* Placeholder Quick Reference Info Badge */}
-            <div className="bg-amber-50/50 border border-amber-100/70 p-4 rounded-2xl text-[11px] text-[#5A5A40]/80">
-              <div className="font-bold flex items-center gap-1 text-[#C49B2A] mb-1">
-                <Info size={14} />
-                Dica técnica: Variáveis Dinâmicas
+            <div className="bg-amber-50/50 border border-amber-100/70 p-4 rounded-2xl text-[11px] text-[#5A5A40]/80 space-y-2">
+              <div className="font-bold flex items-center gap-1.5 text-[#C49B2A]">
+                <Info size={15} />
+                Guia de Variáveis Dinâmicas
               </div>
-              <p className="mb-2 leading-relaxed">Use estes marcadores no texto para herdar e extrair dados automaticamente do Lote/PAC do Ensaio:</p>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 font-mono">
-                <span className="bg-white px-1.5 py-0.5 rounded border border-gray-100">{"{pac_nome}"}</span>
-                <span className="bg-white px-1.5 py-0.5 rounded border border-gray-100">{"{cnpj}"}</span>
-                <span className="bg-white px-1.5 py-0.5 rounded border border-gray-100">{"{total_ensaios}"}</span>
-                <span className="bg-white px-1.5 py-0.5 rounded border border-gray-100">{"{erros_encontrados}"}</span>
-                <span className="bg-white px-1.5 py-0.5 rounded border border-gray-100">{"{percentual_erro}"}</span>
-                <span className="bg-white px-1.5 py-0.5 rounded border border-gray-100">{"{placas_nao_conformes}"}</span>
+              <p className="leading-relaxed text-gray-600">
+                Utilize as variáveis abaixo para automatizar o preenchimento de dados de ensaios e do PAC nos modelos de notificação:
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                <div className="flex items-center gap-2 bg-white/70 px-2 py-1.5 rounded-xl border border-amber-100/40">
+                  <span className="font-mono font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded">{"{razao_social}"}</span>
+                  <span className="text-gray-500 text-[10px]">Razão Social da empresa</span>
+                </div>
+                <div className="flex items-center gap-2 bg-white/70 px-2 py-1.5 rounded-xl border border-amber-100/40">
+                  <span className="font-mono font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded">{"{pac_nome}"}</span>
+                  <span className="text-gray-500 text-[10px]">Nome Amigável do PAC</span>
+                </div>
+                <div className="flex items-center gap-2 bg-white/70 px-2 py-1.5 rounded-xl border border-amber-100/40">
+                  <span className="font-mono font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded">{"{cnpj}"}</span>
+                  <span className="text-gray-500 text-[10px]">CNPJ do PAC</span>
+                </div>
+                <div className="flex items-center gap-2 bg-white/70 px-2 py-1.5 rounded-xl border border-amber-100/40">
+                  <span className="font-mono font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded">{"{total_ensaios}"}</span>
+                  <span className="text-gray-500 text-[10px]">Total de ensaios</span>
+                </div>
+                <div className="flex items-center gap-2 bg-white/70 px-2 py-1.5 rounded-xl border border-amber-100/40">
+                  <span className="font-mono font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded">{"{erros_encontrados}"}</span>
+                  <span className="text-gray-500 text-[10px]">Total de desvios</span>
+                </div>
+                <div className="flex items-center gap-2 bg-white/70 px-2 py-1.5 rounded-xl border border-amber-100/40">
+                  <span className="font-mono font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded">{"{percentual_erro}"}</span>
+                  <span className="text-gray-500 text-[10px]">Índice de erro (%)</span>
+                </div>
+                <div className="flex items-center gap-2 bg-white/70 px-2 py-1.5 rounded-xl border border-amber-100/40 col-span-full">
+                  <span className="font-mono font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded">{"{lotes_detalhes}"}</span>
+                  <span className="text-gray-500 text-[10px]">Relação completa de lotes com período (inicial/final), nº ensaios e recebimento</span>
+                </div>
+                <div className="flex items-center gap-2 bg-white/70 px-2 py-1.5 rounded-xl border border-amber-100/40">
+                  <span className="font-mono font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded">{"{placas_nao_conformes}"}</span>
+                  <span className="text-gray-500 text-[10px]">Placas reprovadas</span>
+                </div>
+                <div className="flex items-center gap-2 bg-white/70 px-2 py-1.5 rounded-xl border border-amber-100/40">
+                  <span className="font-mono font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded">{"{motivo_detalhes}"}</span>
+                  <span className="text-gray-500 text-[10px]">Enquadramentos violados</span>
+                </div>
+                <div className="flex items-center gap-2 bg-white/70 px-2 py-1.5 rounded-xl border border-[#C49B2A]/20 bg-amber-50/20 col-span-full">
+                  <span className="font-mono font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded">{"{data_atual}"}</span>
+                  <span className="text-gray-500 text-[10px]">Data de hoje (DD/MM/AAAA)</span>
+                </div>
               </div>
             </div>
 
@@ -945,6 +1130,78 @@ export default function NotificationTemplatesManager({
                 </div>
               </div>
 
+              {/* PAC Inline Editing Section */}
+              {selectedPacId && (
+                <div className="bg-white/90 p-4 rounded-2xl border border-gray-200 shadow-sm space-y-3 font-sans">
+                  <div className="flex items-center justify-between border-b border-gray-100 pb-2">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-[#5A5A40] flex items-center gap-1.5">
+                      <Settings size={13} className="text-[#5A5A40]/70" />
+                      Alterar Dados Cadastrais do PAC Selecionado
+                    </span>
+                    {selectedPacId === 'sample-pac' && (
+                      <span className="text-[9px] bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded font-bold border border-amber-150">Temporário / Exemplo</span>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-[9px] font-bold uppercase text-gray-500 block">Nome do PAC</label>
+                      <input 
+                        type="text" 
+                        className="w-full p-2 bg-gray-50 border border-gray-200 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-[#5A5A40]/20 disabled:opacity-60"
+                        value={pacEditName}
+                        onChange={e => setPacEditName(e.target.value)}
+                        disabled={selectedPacId === 'sample-pac'}
+                        placeholder="Nome amigável"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[9px] font-bold uppercase text-gray-500 block">Razão Social</label>
+                      <input 
+                        type="text" 
+                        className="w-full p-2 bg-gray-50 border border-gray-200 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-[#5A5A40]/20"
+                        value={pacEditRazaoSocial}
+                        onChange={e => setPacEditRazaoSocial(e.target.value)}
+                        placeholder="Razão Social"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[9px] font-bold uppercase text-gray-500 block">CNPJ</label>
+                      <input 
+                        type="text" 
+                        className="w-full p-2 bg-gray-50 border border-gray-200 rounded-xl text-xs font-mono font-semibold focus:outline-none focus:ring-2 focus:ring-[#5A5A40]/20"
+                        value={pacEditCnpj}
+                        onChange={e => setPacEditCnpj(formatCNPJ(e.target.value))}
+                        placeholder="00.000.000/0000-00"
+                      />
+                    </div>
+                  </div>
+
+                  {selectedPacId !== 'sample-pac' ? (
+                    <div className="flex justify-end gap-3 pt-1 items-center">
+                      {pacSaveSuccess && (
+                        <span className="text-[10px] text-emerald-600 font-bold flex items-center gap-1">
+                          <Check size={12} /> Alterações salvas!
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={handleSavePacInline}
+                        disabled={isSavingPac || !pacEditName.trim()}
+                        className="bg-[#5A5A40] text-white hover:bg-[#4a4a30] transition-colors py-2 px-4 rounded-xl font-bold text-[10px] uppercase tracking-wider flex items-center gap-1.5 shadow-sm disabled:opacity-50"
+                      >
+                        {isSavingPac ? <RefreshCw className="animate-spin" size={11} /> : <Save size={11} />}
+                        Salvar Dados do PAC
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="text-[9px] text-amber-600/80 italic pt-1 leading-relaxed">
+                      * O PAC Exemplo é apenas para testes. Para cadastrar um PAC permanente que possa ser notificado, utilize a aba "Configurações" no painel principal do aplicativo.
+                    </p>
+                  )}
+                </div>
+              )}
+
               {/* Action Buttons: Download PDF and Copy Text */}
               <div className="flex gap-2 justify-end">
                 <button
@@ -996,7 +1253,7 @@ export default function NotificationTemplatesManager({
                   <p className="text-gray-500 font-medium leading-relaxed">{renderTemplateText(oficioIntro)}</p>
 
                   <div className="p-3 bg-gray-50 border border-gray-100 rounded-xl">
-                    <strong className="text-gray-700">EMPRESA NOTIFICADA:</strong> {metrics.pacName}<br/>
+                    <strong className="text-gray-700">EMPRESA NOTIFICADA:</strong> {metrics.razaoSocial || metrics.pacName}<br/>
                     <strong className="text-gray-700">ID / CNPJ:</strong> {metrics.cnpj}
                   </div>
 

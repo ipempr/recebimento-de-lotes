@@ -617,15 +617,19 @@ export default function App() {
           proximoNivel_typeId: 'nt1',
           regraAtraso_ativa: true,
           regraAtraso_ncId: '',
-          regraAtraso_limiteRepeticoes: 1
+          regraAtraso_limiteRepeticoes: 4
         }
       };
 
       if (savedNotificationTypes) {
         initialNotificationTypes = JSON.parse(savedNotificationTypes);
         // Ensure "ALERTA 1 - ORIENTAÇÃO" type exists as first option
-        if (!initialNotificationTypes.some(t => t.id === 'nt0' || t.name === 'ALERTA 1 - ORIENTAÇÃO')) {
+        const existingAlerta = initialNotificationTypes.find(t => t.id === 'nt0' || t.name === 'ALERTA 1 - ORIENTAÇÃO');
+        if (!existingAlerta) {
           initialNotificationTypes.unshift(defaultAlertaType);
+          localStorage.setItem('lotes_notification_types', JSON.stringify(initialNotificationTypes));
+        } else if (existingAlerta.rule && (existingAlerta.rule.regraAtraso_limiteRepeticoes ?? 0) < 4) {
+          existingAlerta.rule.regraAtraso_limiteRepeticoes = 4;
           localStorage.setItem('lotes_notification_types', JSON.stringify(initialNotificationTypes));
         }
       } else {
@@ -1002,7 +1006,7 @@ export default function App() {
   const handleUpdateConfig = async (type: string, id: string, name: string, extraFields?: any) => {
     if (isLocalMode) {
       if (type === 'pacs') {
-        const updated = pacs.map(p => p.id === id ? { ...p, name } : p).sort((a, b) => a.name.localeCompare(b.name));
+        const updated = pacs.map(p => p.id === id ? { ...p, name, ...(extraFields || {}) } : p).sort((a, b) => a.name.localeCompare(b.name));
         setPacs(updated);
         localStorage.setItem('lotes_pacs', JSON.stringify(updated));
       } else if (type === 'collaborators') {
@@ -2251,6 +2255,21 @@ function BatchModal({ isOpen, onClose, batch, pacs, collaborators, statuses, non
   );
 }
 
+function formatCNPJ(value: string) {
+  const digits = value.replace(/\D/g, '').substring(0, 14);
+  let res = digits;
+  if (digits.length > 12) {
+    res = `${digits.substring(0, 2)}.${digits.substring(2, 5)}.${digits.substring(5, 8)}/${digits.substring(8, 12)}-${digits.substring(12)}`;
+  } else if (digits.length > 8) {
+    res = `${digits.substring(0, 2)}.${digits.substring(2, 5)}.${digits.substring(5, 8)}/${digits.substring(8)}`;
+  } else if (digits.length > 5) {
+    res = `${digits.substring(0, 2)}.${digits.substring(2, 5)}.${digits.substring(5)}`;
+  } else if (digits.length > 2) {
+    res = `${digits.substring(0, 2)}.${digits.substring(2)}`;
+  }
+  return res;
+}
+
 function ConfigPanel({ 
   pacs, 
   collaborators, 
@@ -2280,6 +2299,12 @@ function ConfigPanel({
   const [newItemName, setNewItemName] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState('');
+
+  // PAC specific states
+  const [newPacRazaoSocial, setNewPacRazaoSocial] = useState('');
+  const [newPacCnpj, setNewPacCnpj] = useState('');
+  const [editingPacRazaoSocial, setEditingPacRazaoSocial] = useState('');
+  const [editingPacCnpj, setEditingPacCnpj] = useState('');
 
   // States for enquadramentos
   const [framingSearch, setFramingSearch] = useState('');
@@ -2965,11 +2990,13 @@ function ConfigPanel({
       activeConfig === 'status' ? 'statuses' : 
       activeConfig === 'notification_types' ? 'notification_types' : 'non_conformities_configs';
     if (isLocalMode) {
-      const newItem = {
+      const newItem: any = {
         id: 'local-cfg-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9),
         name: newItemName
       };
       if (collectionName === 'pacs') {
+        newItem.razaoSocial = newPacRazaoSocial;
+        newItem.cnpj = newPacCnpj;
         const sorted = [...pacs, newItem].sort((a, b) => a.name.localeCompare(b.name));
         setPacs(sorted);
         localStorage.setItem('lotes_pacs', JSON.stringify(sorted));
@@ -2999,10 +3026,16 @@ function ConfigPanel({
       }
       setNewItemName('');
       setSelectedFramingId('');
+      setNewPacRazaoSocial('');
+      setNewPacCnpj('');
       return;
     }
     try {
       const dataToAdd: any = { name: newItemName };
+      if (collectionName === 'pacs') {
+        dataToAdd.razaoSocial = newPacRazaoSocial;
+        dataToAdd.cnpj = newPacCnpj;
+      }
       if (collectionName === 'non_conformities_configs') {
         const selectedFraming = framings.find((f: any) => f.id === selectedFramingId);
         dataToAdd.framingId = selectedFramingId || '';
@@ -3012,6 +3045,8 @@ function ConfigPanel({
       await addDoc(collection(db, collectionName), dataToAdd);
       setNewItemName('');
       setSelectedFramingId('');
+      setNewPacRazaoSocial('');
+      setNewPacCnpj('');
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, collectionName);
     }
@@ -3058,6 +3093,10 @@ function ConfigPanel({
     if (activeConfig === 'non_conformities') {
       setEditingConfigFramingId(item.framingId || '');
     }
+    if (activeConfig === 'pacs') {
+      setEditingPacRazaoSocial(item.razaoSocial || '');
+      setEditingPacCnpj(item.cnpj || '');
+    }
   };
 
   const handleSaveEdit = async () => {
@@ -3077,12 +3116,20 @@ function ConfigPanel({
         framingDescription: selectedFraming ? selectedFraming.description : ''
       };
     }
+    if (collectionName === 'pacs') {
+      extraFields = {
+        razaoSocial: editingPacRazaoSocial,
+        cnpj: editingPacCnpj
+      };
+    }
 
     try {
       await onUpdate(collectionName, editingId, editingValue.trim(), extraFields);
       setEditingId(null);
       setEditingValue('');
       setEditingConfigFramingId('');
+      setEditingPacRazaoSocial('');
+      setEditingPacCnpj('');
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `${collectionName}/${editingId}`);
     }
@@ -3896,12 +3943,52 @@ function ConfigPanel({
                 </button>
               </div>
             </div>
+          ) : activeConfig === 'pacs' ? (
+            <div className="flex flex-col md:flex-row gap-3 mb-6 bg-[#f5f5f0]/40 p-4 rounded-2xl border border-[#e5e5e0]">
+              <div className="flex-1 space-y-1">
+                <label className="text-[10px] font-bold uppercase text-[#5A5A40] block">Nome Amigável do PAC</label>
+                <input 
+                  type="text" 
+                  placeholder="Ex: PAC Itajaí..."
+                  className="w-full p-2.5 bg-white border border-[#e5e5e0] rounded-xl text-xs focus:ring-2 focus:ring-[#5A5A40]/20 font-medium"
+                  value={newItemName}
+                  onChange={e => setNewItemName(e.target.value)}
+                />
+              </div>
+              <div className="flex-1 space-y-1">
+                <label className="text-[10px] font-bold uppercase text-[#5A5A40] block">Razão Social</label>
+                <input 
+                  type="text" 
+                  placeholder="Razão Social para Notificações..."
+                  className="w-full p-2.5 bg-white border border-[#e5e5e0] rounded-xl text-xs focus:ring-2 focus:ring-[#5A5A40]/20 font-medium"
+                  value={newPacRazaoSocial}
+                  onChange={e => setNewPacRazaoSocial(e.target.value)}
+                />
+              </div>
+              <div className="w-full md:w-56 space-y-1">
+                <label className="text-[10px] font-bold uppercase text-[#5A5A40] block">CNPJ</label>
+                <input 
+                  type="text" 
+                  placeholder="00.000.000/0000-00"
+                  className="w-full p-2.5 bg-white border border-[#e5e5e0] rounded-xl text-xs focus:ring-2 focus:ring-[#5A5A40]/20 font-medium font-mono"
+                  value={newPacCnpj}
+                  onChange={e => setNewPacCnpj(formatCNPJ(e.target.value))}
+                />
+              </div>
+              <div className="flex items-end">
+                <button 
+                  onClick={handleAdd}
+                  className="w-full md:w-auto bg-[#5A5A40] text-white px-6 py-2.5 rounded-xl font-bold text-xs hover:bg-[#4a4a30] transition-colors h-[42px]"
+                >
+                  Adicionar
+                </button>
+              </div>
+            </div>
           ) : (
             <div className="flex gap-2 mb-6">
               <input 
                 type="text" 
                 placeholder={
-                  activeConfig === 'pacs' ? 'Novo PAC...' : 
                   activeConfig === 'collabs' ? 'Novo Colaborador...' : 
                   activeConfig === 'status' ? 'Novo Status...' : 
                   activeConfig === 'notification_types' ? 'Novo Tipo de Notificação...' :
@@ -3926,7 +4013,7 @@ function ConfigPanel({
                 {editingId === item.id ? (
                   <div className="flex flex-col md:flex-row flex-1 gap-3 bg-white p-3 rounded-lg border border-[#e5e5e0]">
                     <div className="flex-1">
-                      <label className="text-[9px] font-bold uppercase text-gray-400 block mb-1">Descrição</label>
+                      <label className="text-[9px] font-bold uppercase text-gray-400 block mb-1">Nome Amigável / Descrição</label>
                       <input 
                         type="text"
                         className="w-full px-3 py-1.5 bg-white border border-[#e5e5e0] rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-[#5A5A40]/20 font-medium"
@@ -3935,6 +4022,28 @@ function ConfigPanel({
                         autoFocus
                       />
                     </div>
+                    {activeConfig === 'pacs' && (
+                      <>
+                        <div className="flex-1">
+                          <label className="text-[9px] font-bold uppercase text-gray-400 block mb-1">Razão Social</label>
+                          <input 
+                            type="text"
+                            className="w-full px-3 py-1.5 bg-white border border-[#e5e5e0] rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-[#5A5A40]/20 font-medium"
+                            value={editingPacRazaoSocial}
+                            onChange={(e) => setEditingPacRazaoSocial(e.target.value)}
+                          />
+                        </div>
+                        <div className="w-full md:w-48">
+                          <label className="text-[9px] font-bold uppercase text-gray-400 block mb-1">CNPJ</label>
+                          <input 
+                            type="text"
+                            className="w-full px-3 py-1.5 bg-white border border-[#e5e5e0] rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-[#5A5A40]/20 font-medium font-mono"
+                            value={editingPacCnpj}
+                            onChange={(e) => setEditingPacCnpj(formatCNPJ(e.target.value))}
+                          />
+                        </div>
+                      </>
+                    )}
                     {activeConfig === 'non_conformities' && (
                       <div className="w-full md:w-60">
                         <label className="text-[9px] font-bold uppercase text-gray-400 block mb-1">Enquadramento Vinculado</label>
@@ -3976,6 +4085,23 @@ function ConfigPanel({
                   <>
                     <div className="flex-1 pr-4">
                       <span className="font-semibold text-gray-800 text-sm block">{item.name}</span>
+                      {activeConfig === 'pacs' && (
+                        <div className="mt-1 text-xs text-[#5A5A40]/70 flex flex-wrap gap-3 items-center">
+                          {item.razaoSocial && (
+                            <span className="inline-flex items-center text-[11px] text-gray-600">
+                              <strong className="text-gray-500 mr-1">Razão Social:</strong> {item.razaoSocial}
+                            </span>
+                          )}
+                          {item.cnpj && (
+                            <span className="inline-flex items-center text-[11px] font-mono text-gray-600 bg-[#5A5A40]/10 px-1.5 py-0.5 rounded">
+                              <strong className="text-gray-500 mr-1 font-sans font-bold text-[10px]">CNPJ:</strong> {item.cnpj}
+                            </span>
+                          )}
+                          {!item.razaoSocial && !item.cnpj && (
+                            <span className="text-[10px] text-gray-400 italic">-- Sem Razão Social e CNPJ cadastrados --</span>
+                          )}
+                        </div>
+                      )}
                       {activeConfig === 'non_conformities' && (
                         <div className="mt-1 text-xs text-[#5A5A40]/70 flex flex-wrap gap-2 items-center">
                           {item.framingNumber ? (
@@ -4187,6 +4313,7 @@ function ConfigPanel({
         handleFirestoreError={handleFirestoreError}
         batches={batches}
         pacs={pacs}
+        setPacs={setPacs}
         nonConformityRecords={nonConformityRecords}
         nonConformitiesConfigs={nonConformitiesConfigs}
         logoUrl={logoUrl}
