@@ -430,9 +430,9 @@ export default function NotificationTemplatesManager({
     // Filter batches for this PAC with nonConformities
     const pacBatches = batches.filter(b => b.pac === pacObj.name || b.pac === pacObj.id);
     let totalEnsaios = 0;
-    const nonConformingPlates: string[] = [];
     const groundsUnique = new Set<string>();
     const lotesList: string[] = [];
+    const platesByNcName: { [key: string]: string[] } = {};
 
     const formatDate = (ts: any) => {
       if (!ts) return 'N/A';
@@ -468,8 +468,15 @@ export default function NotificationTemplatesManager({
 
       ncs.forEach((nc: any) => {
         groundsUnique.add(nc.nao_conformidade_name);
+        const name = nc.nao_conformidade_name || 'Outro';
+        if (!platesByNcName[name]) {
+          platesByNcName[name] = [];
+        }
         (nc.placas || []).forEach((p: string) => {
-          nonConformingPlates.push(`${p.trim().toUpperCase()} (${nc.nao_conformidade_name})`);
+          const trimmed = p.trim().toUpperCase();
+          if (trimmed && !platesByNcName[name].includes(trimmed)) {
+            platesByNcName[name].push(trimmed);
+          }
         });
       });
 
@@ -511,7 +518,15 @@ export default function NotificationTemplatesManager({
       }
     });
 
-    const totalErros = nonConformingPlates.length;
+    const groupedPlatesLines = Object.entries(platesByNcName).map(([ncName, plates]) => {
+      const qty = plates.length;
+      const pluralStr = qty === 1 ? 'placa' : 'placas';
+      return `• ${ncName} (${qty} ${pluralStr}): ${plates.join(', ')}`;
+    });
+
+    const platesJoinedFormatted = groupedPlatesLines.join('\n') || '(Nenhuma placa encontrada)';
+    const totalErros = Object.values(platesByNcName).reduce((acc, curr) => acc + curr.length, 0);
+
     const percent = totalEnsaios > 0 ? ((totalErros / totalEnsaios) * 100).toFixed(2) : '0.00';
     const lotesDetalhesString = lotesList.length > 0 
       ? lotesList.join('\n\n') 
@@ -524,7 +539,7 @@ export default function NotificationTemplatesManager({
       totalEnsaios,
       errosEncontrados: totalErros,
       percentualErro: percent,
-      placasNaoConformesList: nonConformingPlates.join(', ') || '(Nenhuma placa encontrada)',
+      placasNaoConformesList: platesJoinedFormatted,
       enquadramentos: Array.from(groundsUnique).join(', ') || 'Sem enquadramentos',
       processo: `IMETRO-SC 52603.000${selectedPacId.slice(-3) || '999'}/2026-31`,
       lotesDetalhes: lotesDetalhesString
@@ -537,8 +552,9 @@ export default function NotificationTemplatesManager({
   const renderTemplateText = (text: string) => {
     if (!text) return '';
     return text
-      .replace(/{pac_nome}/g, metrics.pacName)
-      .replace(/{razao_social}/g, metrics.razaoSocial)
+      .replace(/{pac_nome}/g, metrics.razaoSocial || metrics.pacName)
+      .replace(/{pac_name}/g, metrics.razaoSocial || metrics.pacName)
+      .replace(/{razao_social}/g, metrics.razaoSocial || metrics.pacName)
       .replace(/{cnpj}/g, metrics.cnpj)
       .replace(/{total_ensaios}/g, String(metrics.totalEnsaios))
       .replace(/{erros_encontrados}/g, String(metrics.errosEncontrados))

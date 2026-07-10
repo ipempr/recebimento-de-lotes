@@ -169,6 +169,12 @@ export default function NotificationsPanel({
   const totalNCBatchesCount = activeNCBatches.length;
   const totalGeneratedNotificationsCount = generatedNotifications.length;
 
+  const viewingPacObj = viewingNotification 
+    ? pacs.find(p => p.id === viewingNotification.pac_id || p.name === viewingNotification.pac_name)
+    : null;
+  const viewingPacRazaoSocial = viewingPacObj ? (viewingPacObj.razaoSocial || viewingPacObj.name) : (viewingNotification?.pac_name || '');
+  const viewingPacCNPJ = viewingPacObj ? (viewingPacObj.cnpj || '02.943.486/0001-70') : '02.943.486/0001-70';
+
   // Group non-conformities by reason
   const getGroupedNonConformities = (nonConformities: any[]): GroupedNC[] => {
     const groups: { [key: string]: string[] } = {};
@@ -445,8 +451,8 @@ export default function NotificationsPanel({
     const fullBatches = batchesWithNCs.filter(b => notificationBatchesIds.includes(b.id));
 
     let totalEnsaios = 0;
-    const nonConformingPlates: string[] = [];
     const groundsUnique = new Set<string>();
+    const platesByNcName: { [key: string]: string[] } = {};
 
     const formatDate = (ts: any) => {
       if (!ts) return 'N/A';
@@ -472,8 +478,15 @@ export default function NotificationsPanel({
       const ncs = b.nonConformities || [];
       ncs.forEach((nc: any) => {
         groundsUnique.add(nc.nao_conformidade_name);
+        const name = nc.nao_conformidade_name || 'Outro';
+        if (!platesByNcName[name]) {
+          platesByNcName[name] = [];
+        }
         (nc.placas || []).forEach((p: string) => {
-          nonConformingPlates.push(`${p.trim().toUpperCase()} (${nc.nao_conformidade_name})`);
+          const trimmed = p.trim().toUpperCase();
+          if (trimmed && !platesByNcName[name].includes(trimmed)) {
+            platesByNcName[name].push(trimmed);
+          }
         });
       });
 
@@ -523,18 +536,26 @@ export default function NotificationsPanel({
       : '(Nenhum lote irregular ou entregue fora do prazo foi identificado para este PAC)';
 
     const pacObj = pacs.find(p => p.id === item.pac_id || p.name === item.pac_name);
-    const pacRazaoSocial = pacObj ? pacObj.name : (item.pac_name || '');
-    const pacCNPJ = pacObj ? pacObj.cnpj : '02.943.486/0001-70';
+    const pacRazaoSocial = pacObj ? (pacObj.razaoSocial || pacObj.name) : (item.pac_name || '');
+    const pacCNPJ = pacObj ? (pacObj.cnpj || '02.943.486/0001-70') : '02.943.486/0001-70';
 
-    const errosEncontrados = nonConformingPlates.length;
+    const groupedPlatesLines = Object.entries(platesByNcName).map(([ncName, plates]) => {
+      const qty = plates.length;
+      const pluralStr = qty === 1 ? 'placa' : 'placas';
+      return `• ${ncName} (${qty} ${pluralStr}): ${plates.join(', ')}`;
+    });
+
+    const platesJoinedFormatted = groupedPlatesLines.join('\n') || '(Nenhuma placa encontrada)';
+    const errosEncontrados = Object.values(platesByNcName).reduce((acc, curr) => acc + curr.length, 0);
+
     const percentualErro = totalEnsaios > 0 ? ((errosEncontrados / totalEnsaios) * 100).toFixed(2) : '0.00';
-    const platesJoinedFormatted = nonConformingPlates.join(', ') || '(Nenhuma placa encontrada)';
     const reasonsJoinedFormatted = Array.from(groundsUnique).join(', ') || 'Nenhum desvio específico';
 
     const compilePlaceholders = (text: string) => {
       if (!text) return '';
       return text
-        .replace(/{pac_name}/g, item.pac_name || '')
+        .replace(/{pac_name}/g, pacRazaoSocial)
+        .replace(/{pac_nome}/g, pacRazaoSocial)
         .replace(/{razao_social}/g, pacRazaoSocial)
         .replace(/{cnpj}/g, pacCNPJ)
         .replace(/{total_ensaios}/g, String(totalEnsaios))
@@ -665,6 +686,10 @@ export default function NotificationsPanel({
     const printWindow = window.open('', '_blank');
     if (!printWindow) return;
 
+    const pacObj = pacs.find(p => p.id === viewingNotification?.pac_id || p.name === viewingNotification?.pac_name);
+    const pacRazaoSocial = pacObj ? (pacObj.razaoSocial || pacObj.name) : (viewingNotification?.pac_name || '');
+    const pacCNPJ = pacObj ? (pacObj.cnpj || '02.943.486/0001-70') : '02.943.486/0001-70';
+
     const getIconEmoji = (iconId: string) => {
       const mapping: { [key: string]: string } = {
         'search': '🔍',
@@ -718,7 +743,7 @@ export default function NotificationsPanel({
     printWindow.document.write(`
       <html>
         <head>
-          <title>${editableOficioTitle} - ${viewingNotification?.pac_name}</title>
+          <title>${editableOficioTitle} - ${pacRazaoSocial}</title>
           <style>
             @media print {
               body { 
@@ -850,8 +875,8 @@ export default function NotificationsPanel({
           </div>
 
           <div class="target-box print-avoid-break">
-            <strong>EMPRESA NOTIFICADA:</strong> ${viewingNotification?.pac_name}<br/>
-            <strong>CNPJ/ID:</strong> 02.943.486/0001-70
+            <strong>EMPRESA NOTIFICADA:</strong> ${pacRazaoSocial}<br/>
+            <strong>CNPJ/ID:</strong> ${pacCNPJ}
           </div>
 
           <div class="sections-container">
@@ -1784,8 +1809,8 @@ export default function NotificationsPanel({
                       <div className="bg-gray-50 border border-gray-200 rounded-2xl p-4 text-[11px]">
                         <strong className="text-gray-800 font-mono uppercase block text-[9px] text-gray-400 mb-1">Empresa Alvo do Processo Administrativo:</strong>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-gray-700">
-                          <div><strong>NOME:</strong> {viewingNotification.pac_name}</div>
-                          <div><strong>CNPJ/REGISTRO:</strong> 02.943.486/0001-70</div>
+                          <div><strong>NOME / RAZÃO SOCIAL:</strong> {viewingPacRazaoSocial}</div>
+                          <div><strong>CNPJ:</strong> {viewingPacCNPJ}</div>
                         </div>
                       </div>
 
@@ -1855,9 +1880,9 @@ export default function NotificationsPanel({
                     // WhatsApp Bubble device mock
                     <div className="bg-[#efeae2] rounded-3xl border border-gray-300 shadow-lg max-w-sm mx-auto overflow-hidden flex flex-col h-[500px]">
                       <div className="bg-[#075e54] p-3 flex items-center text-white gap-2 shrink-0">
-                        <span className="w-8 h-8 rounded-full bg-emerald-100 text-teal-900 font-extrabold flex items-center justify-center text-xs">IM</span>
+                        <span className="w-8 h-8 rounded-full bg-emerald-100 text-teal-900 font-extrabold flex items-center justify-center text-xs">IP</span>
                         <div>
-                          <h4 className="font-bold text-xs">IMETRO-SC Notificações</h4>
+                          <h4 className="font-bold text-xs">IPEM-PR Notificações</h4>
                           <span className="text-[8px] opacity-75 block">Online • Canal Comercial</span>
                         </div>
                       </div>
