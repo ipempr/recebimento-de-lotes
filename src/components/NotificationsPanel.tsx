@@ -133,6 +133,19 @@ export default function NotificationsPanel({
     return d ? format(d, "dd/MM/yyyy", { locale: ptBR }) : '-';
   };
 
+  const isBatchDefended = (batchId: string) => {
+    return (generatedNotifications || []).some(n => 
+      n.status === 'DEFESA_RECEBIDA' && 
+      n.batches?.some((nb: any) => nb.id === batchId)
+    );
+  };
+
+  const isBatchNotified = (batchId: string) => {
+    return (generatedNotifications || []).some(n => 
+      n.batches?.some((nb: any) => nb.id === batchId)
+    );
+  };
+
   // Associate each batch with its nonConformities based on mode
   const batchesWithNCs = batches.map(batch => {
     const ncs = isLocalMode 
@@ -159,9 +172,10 @@ export default function NotificationsPanel({
   // Group PACs with active nonconformity records
   const pacsWithNC = pacs.map(pac => {
     const pacBatches = activeNCBatches.filter(b => b.pac === pac.name || b.pac === pac.id);
+    const activeAndUndefendedBatches = pacBatches.filter(b => !isBatchDefended(b.id));
     return {
       ...pac,
-      batches: pacBatches
+      batches: activeAndUndefendedBatches
     };
   }).filter(p => p.batches.length > 0);
 
@@ -666,6 +680,34 @@ export default function NotificationsPanel({
     }
   };
 
+  const handleUpdateNotificationStatus = async (notifId: string, newStatus: string) => {
+    try {
+      const existing = generatedNotifications.find(n => n.id === notifId);
+      if (!existing) return;
+
+      const updatedItem = {
+        ...existing,
+        status: newStatus
+      };
+
+      if (isLocalMode) {
+        const updated = generatedNotifications.map(n => n.id === notifId ? updatedItem : n);
+        setGeneratedNotifications(updated);
+        localStorage.setItem('lotes_notifications', JSON.stringify(updated));
+      } else {
+        const docRef = doc(db, 'notifications', notifId);
+        await updateDoc(docRef, { status: newStatus });
+        setGeneratedNotifications(prev => prev.map(n => n.id === notifId ? updatedItem : n));
+      }
+
+      setNotificationSuccess("Status da notificação atualizado com sucesso!");
+      setTimeout(() => setNotificationSuccess(null), 3000);
+    } catch (err: any) {
+      console.error(err);
+      alert("Erro ao atualizar status da notificação: " + err.message);
+    }
+  };
+
   const handleCopyViewingText = () => {
     let text = '';
     if (previewChannel === 'oficio') {
@@ -1040,6 +1082,7 @@ export default function NotificationsPanel({
               };
 
               const recommendation = getRecommendation();
+              const allBatchesNotified = pac.batches.length > 0 && pac.batches.every(b => isBatchNotified(b.id));
 
               return (
                 <div key={pac.id} className="bg-white rounded-[32px] border border-[#e5e5e0] overflow-hidden flex flex-col h-full shadow-sm hover:shadow-md transition-shadow">
@@ -1055,7 +1098,15 @@ export default function NotificationsPanel({
                       </div>
                     </div>
                     
-                    {recommendation ? (
+                    {allBatchesNotified ? (
+                      <button
+                        disabled
+                        className="bg-emerald-100 text-emerald-800 border border-emerald-300 py-2.5 px-4 rounded-xl text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 shadow-sm cursor-not-allowed opacity-80"
+                      >
+                        <Check size={14} className="text-emerald-600" />
+                        AÇÃO CONCLUÍDA
+                      </button>
+                    ) : recommendation ? (
                       <button
                         onClick={() => handleOpenGenerateModal(pac, recommendation.type.id)}
                         className="bg-amber-600 hover:bg-amber-700 text-white transition-colors py-2.5 px-4 rounded-xl text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 shadow-sm"
@@ -1077,7 +1128,24 @@ export default function NotificationsPanel({
                   {/* Batches list */}
                   <div className="p-6 space-y-4 flex-1">
                     {/* Embedded Recommendation Indicator */}
-                    {recommendation && (
+                    {allBatchesNotified ? (
+                      <div className="bg-emerald-50 border border-emerald-200/70 p-4 rounded-2xl flex items-start gap-3 mb-4">
+                        <div className="p-2 bg-emerald-100 text-emerald-700 rounded-xl mt-0.5">
+                          <CheckCircle2 size={16} />
+                        </div>
+                        <div className="flex-1 space-y-1">
+                          <span className="text-[9px] uppercase tracking-wider font-extrabold text-emerald-800">
+                            Ação Concluída
+                          </span>
+                          <h5 className="text-xs font-bold text-gray-900 leading-snug">
+                            Notificação emitida para os lotes ativos
+                          </h5>
+                          <p className="text-[10px] text-gray-600 leading-normal">
+                            Todas as não-conformidades ativas sob análise já foram alvo de notificação oficial. Aguarde novas irregularidades ou a apresentação de defesas.
+                          </p>
+                        </div>
+                      </div>
+                    ) : recommendation ? (
                       <div className="bg-amber-50/50 border border-amber-200/50 p-4 rounded-2xl flex items-start gap-3 mb-4">
                         <div className="p-2 bg-amber-100 text-amber-700 rounded-xl mt-0.5">
                           <Sparkles size={16} />
@@ -1108,7 +1176,7 @@ export default function NotificationsPanel({
                           </button>
                         </div>
                       </div>
-                    )}
+                    ) : null}
 
                     <p className="text-xs font-bold uppercase text-[#5A5A40]/70 tracking-wider">Lotes Vinculados</p>
                     
@@ -1272,9 +1340,10 @@ export default function NotificationsPanel({
                       </div>
                       <span className={cn(
                         "px-2.5 py-1 rounded-lg text-[9px] font-extrabold uppercase bg-sky-50 text-sky-700 tracking-wide border border-sky-200/50",
-                        item.status === 'RETIFICADA' && "bg-amber-50 text-amber-700 border-amber-200"
+                        item.status === 'RETIFICADA' && "bg-amber-50 text-amber-700 border-amber-200",
+                        item.status === 'DEFESA_RECEBIDA' && "bg-emerald-50 text-emerald-700 border-emerald-200"
                       )}>
-                        {item.status || item.notification_type_name || 'Autuação'}
+                        {item.status === 'DEFESA_RECEBIDA' ? 'DEFESA RECEBIDA' : (item.status || item.notification_type_name || 'Autuação')}
                       </span>
                     </div>
 
@@ -1300,6 +1369,19 @@ export default function NotificationsPanel({
                           "{item.notes}"
                         </div>
                       )}
+
+                      <div className="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between gap-2">
+                        <span className="text-[10px] text-gray-400 font-semibold uppercase">Situação da Defesa:</span>
+                        <select
+                          value={item.status === 'DEFESA_RECEBIDA' ? 'DEFESA_RECEBIDA' : (item.status === 'RETIFICADA' ? 'RETIFICADA' : 'GERADA')}
+                          onChange={(e) => handleUpdateNotificationStatus(item.id, e.target.value)}
+                          className="bg-gray-50 border border-gray-200 text-gray-700 rounded-lg py-1 px-2 text-[10px] font-bold focus:outline-none focus:ring-1 focus:ring-[#5A5A40]/30 cursor-pointer"
+                        >
+                          <option value="GERADA">Aguardando Defesa</option>
+                          <option value="RETIFICADA">Retificada</option>
+                          <option value="DEFESA_RECEBIDA">Defesa Recebida</option>
+                        </select>
+                      </div>
                     </div>
                   </div>
 
