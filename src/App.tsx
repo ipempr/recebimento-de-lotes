@@ -362,6 +362,9 @@ export default function App() {
   const [configToDelete, setConfigToDelete] = useState<{type: string, id: string} | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [googleLoginError, setGoogleLoginError] = useState<any | null>(null);
+  const [quotaFallbackNotice, setQuotaFallbackNotice] = useState(() => {
+    return localStorage.getItem('lotes_quota_exceeded_fallback') === 'true';
+  });
 
   // Dashboard Period States
   const defaultDashStart = useMemo(() => format(new Date(new Date().getFullYear(), new Date().getMonth(), 1), 'yyyy-MM-dd'), []);
@@ -372,8 +375,9 @@ export default function App() {
 
   // Error Handler
   const handleFirestoreError = (error: unknown, operationType: OperationType, path: string | null) => {
+    const errorMsg = error instanceof Error ? error.message : String(error);
     const errInfo: FirestoreErrorInfo = {
-      error: error instanceof Error ? error.message : String(error),
+      error: errorMsg,
       authInfo: {
         userId: auth.currentUser?.uid,
         email: auth.currentUser?.email,
@@ -383,6 +387,57 @@ export default function App() {
       path
     };
     console.error('Firestore Error: ', JSON.stringify(errInfo));
+
+    if (isLocalMode) {
+      console.warn("Firestore error in local mode (ignored):", errorMsg);
+      return;
+    }
+
+    const isQuota = errorMsg.toLowerCase().includes('quota') || 
+                    errorMsg.toLowerCase().includes('exceeded') || 
+                    errorMsg.toLowerCase().includes('cota') || 
+                    errorMsg.toLowerCase().includes('limite') || 
+                    errorMsg.toLowerCase().includes('permission') ||
+                    errorMsg.toLowerCase().includes('reached');
+
+    if (isQuota) {
+      console.warn("Quota exceeded detected! Automatically switching to Local Mode to prevent disruption.");
+      localStorage.setItem('lotes_isLocalMode', 'true');
+      localStorage.setItem('lotes_quota_exceeded_fallback', 'true');
+      
+      // Save what we can
+      if (batches && batches.length > 0) {
+        try { localStorage.setItem('lotes_batches', JSON.stringify(batches)); } catch(e){}
+      }
+      if (pacs && pacs.length > 0) {
+        try { localStorage.setItem('lotes_pacs', JSON.stringify(pacs)); } catch(e){}
+      }
+      if (collaborators && collaborators.length > 0) {
+        try { localStorage.setItem('lotes_collaborators', JSON.stringify(collaborators)); } catch(e){}
+      }
+      if (statuses && statuses.length > 0) {
+        try { localStorage.setItem('lotes_statuses', JSON.stringify(statuses)); } catch(e){}
+      }
+      if (nonConformitiesConfigs && nonConformitiesConfigs.length > 0) {
+        try { localStorage.setItem('lotes_non_conformities_configs', JSON.stringify(nonConformitiesConfigs)); } catch(e){}
+      }
+      if (nonConformityRecords && nonConformityRecords.length > 0) {
+        try { localStorage.setItem('lotes_non_conformities', JSON.stringify(nonConformityRecords)); } catch(e){}
+      }
+      if (notificationTypes && notificationTypes.length > 0) {
+        try { localStorage.setItem('lotes_notification_types', JSON.stringify(notificationTypes)); } catch(e){}
+      }
+      if (framings && framings.length > 0) {
+        try { localStorage.setItem('lotes_framings', JSON.stringify(framings)); } catch(e){}
+      }
+      if (generatedNotifications && generatedNotifications.length > 0) {
+        try { localStorage.setItem('lotes_notifications', JSON.stringify(generatedNotifications)); } catch(e){}
+      }
+
+      window.location.reload();
+      return;
+    }
+
     setError(`Erro na operação ${operationType}: ${errInfo.error}`);
   };
 
@@ -1048,7 +1103,7 @@ export default function App() {
       <div className="min-h-screen flex items-center justify-center bg-[#f5f5f0] p-4">
         <div className="max-w-md w-full bg-white rounded-[32px] p-8 sm:p-12 shadow-xl text-center">
           <h1 className="text-4xl font-display font-bold tracking-tight mb-4 text-[#1a1a1a]">Gestão de Lotes</h1>
-          <p className="text-[#5A5A40] mb-8 leading-relaxed">
+          <p className="text-[#5A5A40] mb-8 leading-relaxed text-sm">
             Gerencie e acompanhe lotes de ensaios de modo rápido, prático e persistente.
           </p>
 
@@ -1077,6 +1132,23 @@ export default function App() {
             );
           })()}
 
+          <div className="mb-6 p-4 rounded-2xl bg-amber-50/50 border border-amber-200/60 text-left space-y-2">
+            <div className="flex items-start gap-2 text-amber-850">
+              <Sparkles size={16} className="shrink-0 mt-0.5 text-amber-600" />
+              <span className="text-xs font-bold uppercase tracking-wider">Aviso de Segurança e Navegação</span>
+            </div>
+            <p className="text-[11px] text-amber-900/90 leading-relaxed">
+              Como o aplicativo está sendo executado dentro do <strong>painel de visualização (iFrame) do AI Studio</strong>, o Google bloqueia cookies de terceiros e janelas popup por segurança. 
+            </p>
+            <div className="text-[11px] text-amber-900/95 font-medium space-y-1">
+              <p>💡 <strong>Como resolver para usar a Nuvem:</strong></p>
+              <ul className="list-disc list-inside pl-1 space-y-0.5">
+                <li>Clique no botão <strong>"Abrir em nova aba" (Open in new tab)</strong> no canto superior direito do painel de visualização.</li>
+                <li>Na nova aba, clique em <strong>"Entrar com Google"</strong>. Lá funcionará perfeitamente!</li>
+              </ul>
+            </div>
+          </div>
+
           <button 
             onClick={handleLogin}
             className="w-full bg-[#5A5A40] text-white rounded-full py-4 font-semibold hover:bg-[#4a4a30] transition-colors flex items-center justify-center gap-3 shadow-md mb-4 cursor-pointer"
@@ -1098,8 +1170,8 @@ export default function App() {
             Entrar em Modo Local (Demonstração)
           </button>
 
-          <p className="text-[11px] text-[#5A5A40]/60 mt-6 leading-relaxed bg-[#f5f5f0] p-4 rounded-2xl border border-[#e5e5e0]">
-            💡 Se você estiver visualizando dentro do editor do AI Studio e os popups forem bloqueados pelo navegador, use o <strong>Modo Local</strong>. Os dados serão salvos de forma segura no seu navegador.
+          <p className="text-[11px] text-[#5A5A40]/60 mt-6 leading-relaxed bg-[#f5f5f0] p-4 rounded-2xl border border-[#e5e5e0] text-left">
+            🎯 <strong>Modo Local Offline:</strong> Permite criar e editar lotes de ensaios, gerar notificações oficiais em PDF, gerenciar modelos de ofício e visualizar estatísticas completas, salvando tudo diretamente no armazenamento do seu navegador.
           </p>
         </div>
       </div>
@@ -1232,6 +1304,35 @@ export default function App() {
             </div>
           );
         })()}
+
+        {quotaFallbackNotice && (
+          <div className="mb-6 rounded-[24px] p-6 bg-amber-50 border border-amber-200 text-amber-900 shadow-md">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="flex items-start gap-3.5">
+                <Sparkles size={22} className="shrink-0 mt-0.5 text-amber-600 animate-pulse" />
+                <div className="space-y-1">
+                  <h3 className="text-sm font-bold uppercase tracking-wider text-amber-850">
+                    Modo Local de Segurança Ativado Automaticamente
+                  </h3>
+                  <p className="text-xs leading-relaxed max-w-4xl text-amber-900/90">
+                    O servidor de banco de dados na nuvem (Firestore) atingiu os limites diários do plano gratuito. Para garantir que seu trabalho continue sem qualquer interrupção, o sistema <strong>ativou automaticamente o Modo de Armazenamento Local</strong> de backup. Seus dados e configurações estão salvos localmente de forma 100% íntegra e segura no seu navegador.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2.5 self-end md:self-center shrink-0">
+                <button 
+                  onClick={() => {
+                    localStorage.removeItem('lotes_quota_exceeded_fallback');
+                    setQuotaFallbackNotice(false);
+                  }} 
+                  className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded-full transition-colors shadow-sm cursor-pointer"
+                >
+                  Entendi
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {activeTab === 'dashboard' ? (
           <>
