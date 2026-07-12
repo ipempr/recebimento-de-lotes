@@ -55,7 +55,10 @@ import {
   ChevronDown,
   Copy,
   Sparkles,
-  BookOpen
+  BookOpen,
+  Lock,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import { format, addDays, differenceInDays, isAfter, isBefore, startOfDay, parse } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -79,6 +82,7 @@ import {
 import NotificationsPanel from './components/NotificationsPanel';
 import NotificationTemplatesManager from './components/NotificationTemplatesManager';
 import { SystemTutorial } from './components/SystemTutorial';
+import { ConfigPasswordGate } from './components/ConfigPasswordGate';
 
 // Utility for tailwind classes
 function cn(...inputs: ClassValue[]) {
@@ -349,6 +353,27 @@ export default function App() {
       } catch (err) {
         console.error("Erro ao salvar assinaturas no Firestore:", err);
         handleFirestoreError(err, OperationType.WRITE, 'configs/branding');
+      }
+    }
+  };
+
+  const [configPassword, setConfigPassword] = useState<string>(() => {
+    return localStorage.getItem('lotes_config_password') || '32512240';
+  });
+
+  const [isConfigUnlocked, setIsConfigUnlocked] = useState<boolean>(() => {
+    return localStorage.getItem('lotes_config_unlocked') === 'true';
+  });
+
+  const saveConfigPassword = async (newPassword: string) => {
+    setConfigPassword(newPassword);
+    localStorage.setItem('lotes_config_password', newPassword);
+    if (!isLocalMode) {
+      try {
+        await setDoc(doc(db, 'configs', 'security'), { password: newPassword }, { merge: true });
+      } catch (err) {
+        console.error("Erro ao salvar senha no Firestore:", err);
+        handleFirestoreError(err, OperationType.WRITE, 'configs/security');
       }
     }
   };
@@ -870,6 +895,20 @@ export default function App() {
       (err) => console.log('Firestore unsubLogo warn:', err)
     );
 
+    const unsubSecurity = onSnapshot(
+      doc(db, 'configs', 'security'),
+      (snapshot) => {
+        if (snapshot.exists()) {
+          const data = snapshot.data();
+          if (data && data.password) {
+            setConfigPassword(data.password);
+            localStorage.setItem('lotes_config_password', data.password);
+          }
+        }
+      },
+      (err) => console.log('Firestore unsubSecurity warn:', err)
+    );
+
     return () => {
       unsubBatches();
       unsubPacs();
@@ -881,6 +920,7 @@ export default function App() {
       unsubFramings();
       unsubNotifications();
       unsubLogo();
+      unsubSecurity();
     };
   }, [user, isLocalMode]);
 
@@ -1545,31 +1585,47 @@ export default function App() {
             signatures={signatures}
           />
         ) : activeTab === 'config' ? (
-          <ConfigPanel 
-            pacs={pacs} 
-            collaborators={collaborators} 
-            statuses={statuses}
-            nonConformitiesConfigs={nonConformitiesConfigs}
-            nonConformityRecords={nonConformityRecords}
-            notificationTypes={notificationTypes}
-            framings={framings}
-            setFramings={setFramings}
-            handleFirestoreError={handleFirestoreError}
-            onUpdate={handleUpdateConfig}
-            setConfigToDelete={setConfigToDelete}
-            isLocalMode={isLocalMode}
-            batches={batches}
-            setBatches={setBatches}
-            setPacs={setPacs}
-            setCollaborators={setCollaborators}
-            setStatuses={setStatuses}
-            setNonConformitiesConfigs={setNonConformitiesConfigs}
-            setNotificationTypes={setNotificationTypes}
-            logoUrl={logoUrl}
-            saveLogoUrl={saveLogoUrl}
-            signatures={signatures}
-            saveSignatures={saveSignatures}
-          />
+          !isConfigUnlocked ? (
+            <ConfigPasswordGate 
+              correctPassword={configPassword}
+              onUnlock={() => {
+                setIsConfigUnlocked(true);
+                localStorage.setItem('lotes_config_unlocked', 'true');
+              }}
+              onCancel={() => setActiveTab('dashboard')}
+            />
+          ) : (
+            <ConfigPanel 
+              pacs={pacs} 
+              collaborators={collaborators} 
+              statuses={statuses}
+              nonConformitiesConfigs={nonConformitiesConfigs}
+              nonConformityRecords={nonConformityRecords}
+              notificationTypes={notificationTypes}
+              framings={framings}
+              setFramings={setFramings}
+              handleFirestoreError={handleFirestoreError}
+              onUpdate={handleUpdateConfig}
+              setConfigToDelete={setConfigToDelete}
+              isLocalMode={isLocalMode}
+              batches={batches}
+              setBatches={setBatches}
+              setPacs={setPacs}
+              setCollaborators={setCollaborators}
+              setStatuses={setStatuses}
+              setNonConformitiesConfigs={setNonConformitiesConfigs}
+              setNotificationTypes={setNotificationTypes}
+              logoUrl={logoUrl}
+              saveLogoUrl={saveLogoUrl}
+              signatures={signatures}
+              saveSignatures={saveSignatures}
+              configPassword={configPassword}
+              saveConfigPassword={saveConfigPassword}
+              isConfigUnlocked={isConfigUnlocked}
+              setIsConfigUnlocked={setIsConfigUnlocked}
+              setActiveTab={setActiveTab}
+            />
+          )
         ) : (
           <SystemTutorial />
         )}
@@ -2430,12 +2486,44 @@ function ConfigPanel({
   logoUrl,
   saveLogoUrl,
   signatures,
-  saveSignatures
+  saveSignatures,
+  configPassword,
+  saveConfigPassword,
+  isConfigUnlocked,
+  setIsConfigUnlocked,
+  setActiveTab
 }: any) {
-  const [activeConfig, setActiveConfig] = useState<'pacs' | 'collabs' | 'status' | 'non_conformities' | 'notification_types' | 'import' | 'branding'>('pacs');
+  const [activeConfig, setActiveConfig] = useState<'pacs' | 'collabs' | 'status' | 'non_conformities' | 'notification_types' | 'import' | 'branding' | 'security'>('pacs');
   const [newItemName, setNewItemName] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState('');
+
+  // Security Tab States
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [securityStatus, setSecurityStatus] = useState<{type: 'success' | 'error', message: string} | null>(null);
+
+  const handleSavePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newPassword) {
+      setSecurityStatus({ type: 'error', message: 'A nova senha não pode ser vazia.' });
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setSecurityStatus({ type: 'error', message: 'As senhas não coincidem. Certifique-se de que ambas sejam iguais.' });
+      return;
+    }
+    try {
+      await saveConfigPassword(newPassword);
+      setSecurityStatus({ type: 'success', message: 'Senha de acesso alterada com sucesso!' });
+      setNewPassword('');
+      setConfirmPassword('');
+    } catch (err) {
+      setSecurityStatus({ type: 'error', message: 'Erro ao salvar nova senha. Tente novamente.' });
+    }
+  };
 
   // PAC specific states
   const [newPacRazaoSocial, setNewPacRazaoSocial] = useState('');
@@ -3431,7 +3519,7 @@ function ConfigPanel({
 
   return (
     <div className="bg-white rounded-[32px] p-8 border border-[#e5e5e0]">
-      <div className="flex gap-4 mb-8">
+      <div className="flex flex-wrap gap-2.5 mb-8">
         <button 
           onClick={() => setActiveConfig('pacs')}
           className={cn("px-4 py-2 rounded-full text-sm font-bold", activeConfig === 'pacs' ? "bg-[#5A5A40] text-white" : "bg-[#f5f5f0] text-[#5A5A40]")}
@@ -3475,6 +3563,13 @@ function ConfigPanel({
         >
           <Upload size={16} />
           Identidade Visual
+        </button>
+        <button 
+          onClick={() => setActiveConfig('security')}
+          className={cn("px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2", activeConfig === 'security' ? "bg-[#5A5A40] text-white" : "bg-[#f5f5f0] text-[#5A5A40]")}
+        >
+          <Lock size={16} />
+          Segurança
         </button>
       </div>
 
@@ -4028,6 +4123,128 @@ function ConfigPanel({
             </div>
           </div>
 
+        </div>
+      ) : activeConfig === 'security' ? (
+        <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-300 text-[#3A3A28]">
+          <div className="bg-[#f5f5f0] p-6 rounded-2xl border border-dashed border-[#5A5A40]/20 space-y-6">
+            <div>
+              <h4 className="font-display font-bold tracking-tight text-lg mb-1">Configurações de Segurança e Acesso</h4>
+              <p className="text-sm text-[#5A5A40]/70">
+                Gerencie as permissões e o controle de acesso às configurações estruturais do sistema de controle de lotes.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-start">
+              {/* Form de Alterar Senha */}
+              <div className="border border-gray-200 bg-white rounded-2xl p-6 shadow-sm space-y-4">
+                <h5 className="font-display font-bold text-sm uppercase tracking-wider text-[#5A5A40] flex items-center gap-2">
+                  <Lock size={16} />
+                  Alterar Senha de Acesso
+                </h5>
+                <p className="text-xs text-gray-500 leading-relaxed">
+                  Defina uma nova senha para proteger o acesso à área de configurações.
+                </p>
+
+                <form onSubmit={handleSavePassword} className="space-y-4">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Nova Senha</label>
+                    <div className="relative">
+                      <input 
+                        type={showNewPassword ? "text" : "password"}
+                        placeholder="Digite a nova senha..."
+                        className="w-full bg-[#f5f5f0] hover:bg-[#ebebe5] focus:bg-white border border-[#e5e5e0] focus:border-[#5A5A40] focus:ring-1 focus:ring-[#5A5A40] rounded-xl px-3 py-2.5 text-xs text-[#3A3A28] outline-none transition-all pr-10"
+                        value={newPassword}
+                        onChange={e => {
+                          setNewPassword(e.target.value);
+                          if (securityStatus) setSecurityStatus(null);
+                        }}
+                      />
+                      <button 
+                        type="button"
+                        onClick={() => setShowNewPassword(!showNewPassword)}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-black/5 transition"
+                      >
+                        {showNewPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Confirmar Nova Senha</label>
+                    <div className="relative">
+                      <input 
+                        type={showConfirmPassword ? "text" : "password"}
+                        placeholder="Confirme a nova senha..."
+                        className="w-full bg-[#f5f5f0] hover:bg-[#ebebe5] focus:bg-white border border-[#e5e5e0] focus:border-[#5A5A40] focus:ring-1 focus:ring-[#5A5A40] rounded-xl px-3 py-2.5 text-xs text-[#3A3A28] outline-none transition-all pr-10"
+                        value={confirmPassword}
+                        onChange={e => {
+                          setConfirmPassword(e.target.value);
+                          if (securityStatus) setSecurityStatus(null);
+                        }}
+                      />
+                      <button 
+                        type="button"
+                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-black/5 transition"
+                      >
+                        {showConfirmPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {securityStatus && (
+                    <div className={cn(
+                      "p-3 rounded-xl flex items-center gap-2 text-xs font-medium border",
+                      securityStatus.type === 'success' ? "bg-emerald-50 text-emerald-700 border-emerald-100" : "bg-rose-50 text-rose-700 border-rose-100"
+                    )}>
+                      {securityStatus.type === 'success' ? <Check size={16} /> : <AlertCircle size={16} />}
+                      <span>{securityStatus.message}</span>
+                    </div>
+                  )}
+
+                  <button 
+                    type="submit"
+                    className="w-full px-4 py-2.5 bg-[#5A5A40] hover:bg-[#484833] text-white font-bold text-xs rounded-xl transition-colors shadow-sm cursor-pointer"
+                  >
+                    Salvar Nova Senha
+                  </button>
+                </form>
+              </div>
+
+              {/* Revogar Permissão */}
+              <div className="border border-gray-200 bg-white rounded-2xl p-6 shadow-sm space-y-4">
+                <h5 className="font-display font-bold text-sm uppercase tracking-wider text-[#5A5A40] flex items-center gap-2">
+                  <Lock size={16} />
+                  Controle de Sessão e Bloqueio
+                </h5>
+                <p className="text-xs text-gray-500 leading-relaxed">
+                  Para garantir a segurança dos dados, principalmente em computadores compartilhados ou de uso coletivo, revogue a autorização atual do painel de configurações.
+                </p>
+                
+                <div className="bg-amber-50 border border-amber-100 p-3.5 rounded-xl space-y-2">
+                  <p className="text-xs text-amber-800 font-medium">
+                    Sua permissão está atualmente <strong>Ativa (Desbloqueada)</strong>.
+                  </p>
+                  <p className="text-[10px] text-amber-700 leading-relaxed">
+                    Ao revogar a permissão, o painel será bloqueado imediatamente e será obrigatório digitar a senha novamente na próxima tentativa de acesso.
+                  </p>
+                </div>
+
+                <button 
+                  type="button"
+                  onClick={() => {
+                    localStorage.removeItem('lotes_config_unlocked');
+                    setIsConfigUnlocked(false);
+                    setActiveTab('dashboard');
+                  }}
+                  className="w-full px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded-xl transition-colors shadow-sm flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <Lock size={14} />
+                  Revogar Permissão e Bloquear Painel
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       ) : (
         <>
