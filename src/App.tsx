@@ -393,12 +393,17 @@ export default function App() {
       return;
     }
 
-    const isQuota = errorMsg.toLowerCase().includes('quota') || 
+    const isQuota = (errorMsg.toLowerCase().includes('quota') || 
                     errorMsg.toLowerCase().includes('exceeded') || 
                     errorMsg.toLowerCase().includes('cota') || 
                     errorMsg.toLowerCase().includes('limite') || 
-                    errorMsg.toLowerCase().includes('permission') ||
-                    errorMsg.toLowerCase().includes('reached');
+                    errorMsg.toLowerCase().includes('reached')) && 
+                    !errorMsg.toLowerCase().includes('permission');
+
+    if (errorMsg.toLowerCase().includes('permission') || errorMsg.toLowerCase().includes('insufficient')) {
+      setError("Acesso Negado / Permissão Insuficiente: Certifique-se de que está logado com uma conta Google autorizada e acessando através de uma aba independente (fora do iFrame).");
+      return;
+    }
 
     if (isQuota) {
       console.warn("Quota exceeded detected! Automatically switching to Local Mode to prevent disruption.");
@@ -1237,7 +1242,26 @@ export default function App() {
           <div className="flex items-center gap-4">
             <div className="text-right hidden sm:block">
               <p className="text-sm font-medium">{user.displayName}</p>
-              <p className="text-xs text-[#5A5A40]">{user.email}</p>
+              <div className="flex flex-col items-end gap-0.5">
+                <p className="text-xs text-[#5A5A40]">{user.email}</p>
+                {isLocalMode ? (
+                  <button 
+                    onClick={() => {
+                      localStorage.removeItem('lotes_isLocalMode');
+                      localStorage.removeItem('lotes_quota_exceeded_fallback');
+                      window.location.reload();
+                    }}
+                    className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200/60 px-2 py-0.5 rounded-full hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200 transition cursor-pointer"
+                    title="Clique para reativar o banco de dados na Nuvem"
+                  >
+                    ⚡ Modo Local (Mudar p/ Nuvem)
+                  </button>
+                ) : (
+                  <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200/60 px-2 py-0.5 rounded-full">
+                    ☁️ Sincronizado com a Nuvem
+                  </span>
+                )}
+              </div>
             </div>
             <button 
               onClick={handleLogout}
@@ -1252,7 +1276,7 @@ export default function App() {
 
       <main className="max-w-7xl mx-auto p-6">
         {error && (() => {
-          const isQuota = error.toLowerCase().includes('quota') || error.toLowerCase().includes('exceeded') || error.toLowerCase().includes('cota') || error.toLowerCase().includes('limite') || error.toLowerCase().includes('permission');
+          const isQuota = (error.toLowerCase().includes('quota') || error.toLowerCase().includes('exceeded') || error.toLowerCase().includes('cota') || error.toLowerCase().includes('limite')) && !error.toLowerCase().includes('permission');
           return (
             <div className={cn(
               "mb-6 rounded-[24px] p-6 shadow-md border",
@@ -1319,7 +1343,19 @@ export default function App() {
                   </p>
                 </div>
               </div>
-              <div className="flex items-center gap-2.5 self-end md:self-center shrink-0">
+              <div className="flex flex-wrap items-center gap-2 self-end md:self-center shrink-0">
+                <button 
+                  onClick={() => {
+                    localStorage.removeItem('lotes_quota_exceeded_fallback');
+                    localStorage.removeItem('lotes_isLocalMode');
+                    setQuotaFallbackNotice(false);
+                    setIsLocalMode(false);
+                    window.location.reload();
+                  }} 
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-full transition-colors shadow-sm cursor-pointer"
+                >
+                  Reativar Nuvem (Firebase)
+                </button>
                 <button 
                   onClick={() => {
                     localStorage.removeItem('lotes_quota_exceeded_fallback');
