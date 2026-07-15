@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   Bell, 
   AlertCircle, 
@@ -104,6 +104,12 @@ export default function NotificationsPanel({
   const [viewingNotificationNotes, setViewingNotificationNotes] = useState('');
   const [notifToDelete, setNotifToDelete] = useState<string | null>(null);
 
+  // States for advanced filtering, sorting and pagination of history
+  const [notifStatusFilter, setNotifStatusFilter] = useState<'all' | 'GERADA' | 'RETIFICADA' | 'DEFESA_RECEBIDA'>('all');
+  const [notifTypeFilter, setNotifTypeFilter] = useState<string>('all');
+  const [notifSortOrder, setNotifSortOrder] = useState<'newest' | 'oldest' | 'pac_asc'>('newest');
+  const [notifDisplayLimit, setNotifDisplayLimit] = useState<number>(12);
+
   // States for receiving defense
   const [receivingDefenseForId, setReceivingDefenseForId] = useState<string | null>(null);
   const [defenseTextInput, setDefenseTextInput] = useState<string>('');
@@ -186,6 +192,55 @@ export default function NotificationsPanel({
   // Calculate stats
   const totalNCBatchesCount = activeNCBatches.length;
   const totalGeneratedNotificationsCount = generatedNotifications.length;
+
+  const filteredAndSortedNotifications = useMemo(() => {
+    let result = [...generatedNotifications];
+
+    // 1. Text search
+    if (notifSearch) {
+      const search = notifSearch.toLowerCase();
+      result = result.filter(n => {
+        const matchPac = n.pac_name?.toLowerCase().includes(search);
+        const matchType = n.notification_type_name?.toLowerCase().includes(search);
+        const matchNotes = n.notes?.toLowerCase().includes(search);
+        const matchDefense = n.defenseText?.toLowerCase().includes(search);
+        return matchPac || matchType || matchNotes || matchDefense;
+      });
+    }
+
+    // 2. Status filter
+    if (notifStatusFilter !== 'all') {
+      result = result.filter(n => {
+        const status = n.status || 'GERADA';
+        return status === notifStatusFilter;
+      });
+    }
+
+    // 3. Notification Type filter
+    if (notifTypeFilter !== 'all') {
+      result = result.filter(n => n.notification_type_id === notifTypeFilter || n.notification_type_name === notifTypeFilter);
+    }
+
+    // 4. Sort order
+    result.sort((a, b) => {
+      if (notifSortOrder === 'newest') {
+        const dateA = getJsDate(a.createdAt)?.getTime() || 0;
+        const dateB = getJsDate(b.createdAt)?.getTime() || 0;
+        return dateB - dateA;
+      } else if (notifSortOrder === 'oldest') {
+        const dateA = getJsDate(a.createdAt)?.getTime() || 0;
+        const dateB = getJsDate(b.createdAt)?.getTime() || 0;
+        return dateA - dateB;
+      } else if (notifSortOrder === 'pac_asc') {
+        const pacA = a.pac_name || '';
+        const pacB = b.pac_name || '';
+        return pacA.localeCompare(pacB);
+      }
+      return 0;
+    });
+
+    return result;
+  }, [generatedNotifications, notifSearch, notifStatusFilter, notifTypeFilter, notifSortOrder]);
 
   const viewingPacObj = viewingNotification 
     ? pacs.find(p => p.id === viewingNotification.pac_id || p.name === viewingNotification.pac_name)
@@ -1345,34 +1400,121 @@ export default function NotificationsPanel({
       ) : (
         <>
           {/* Section: History Tab & General Notification Central */}
-          <div className="bg-white p-6 rounded-[24px] border border-[#e5e5e0] space-y-4">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="bg-white p-6 rounded-[24px] border border-[#e5e5e0] space-y-6">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-[#e5e5e0]/60">
               <div className="space-y-1">
                 <h3 className="text-sm font-bold uppercase tracking-wider text-[#5A5A40]">Central de Notificações Enviadas</h3>
                 <p className="text-xs text-[#5A5A40]/60">Consulte, retifique ou exclua qualquer notificação administrativa que já foi gerada pelo sistema.</p>
               </div>
-              <div className="relative w-full md:w-80">
-                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
-                <input 
-                  type="text"
-                  placeholder="Buscar PAC, tipo ou assunto..."
-                  className="w-full pl-10 pr-4 py-2.5 bg-[#f5f5f0] border-none rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-[#5A5A40]/10"
-                  value={notifSearch}
-                  onChange={e => setNotifSearch(e.target.value)}
-                />
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-bold text-gray-500 bg-gray-100 py-1.5 px-3 rounded-full">
+                  Total: {generatedNotifications.length} notificadas
+                </span>
+                {filteredAndSortedNotifications.length !== generatedNotifications.length && (
+                  <span className="text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 py-1.5 px-3 rounded-full">
+                    Filtradas: {filteredAndSortedNotifications.length} encontradas
+                  </span>
+                )}
               </div>
             </div>
+
+            {/* Advanced Filters Bar */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 bg-gray-50/50 p-4 rounded-2xl border border-gray-100">
+              {/* Search input */}
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-[#5A5A40]/70 block">Busca por Texto</label>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
+                  <input 
+                    type="text"
+                    placeholder="PAC, tipo, obs ou defesa..."
+                    className="w-full pl-9 pr-3 py-2 bg-white border border-[#e5e5e0] rounded-xl text-xs font-medium focus:outline-none focus:ring-1 focus:ring-[#5A5A40]/30"
+                    value={notifSearch}
+                    onChange={e => {
+                      setNotifSearch(e.target.value);
+                      setNotifDisplayLimit(12); // reset limit on search
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* Status filter */}
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-[#5A5A40]/70 block">Filtrar por Situação</label>
+                <select
+                  value={notifStatusFilter}
+                  onChange={e => {
+                    setNotifStatusFilter(e.target.value as any);
+                    setNotifDisplayLimit(12); // reset limit
+                  }}
+                  className="w-full p-2 bg-white border border-[#e5e5e0] rounded-xl text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-[#5A5A40]/30 text-gray-700"
+                >
+                  <option value="all">Todas as Situações</option>
+                  <option value="GERADA">Aguardando Defesa</option>
+                  <option value="DEFESA_RECEBIDA">Defesa Apresentada</option>
+                  <option value="RETIFICADA">Retificadas</option>
+                </select>
+              </div>
+
+              {/* Type filter */}
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-[#5A5A40]/70 block">Filtrar por Tipo</label>
+                <select
+                  value={notifTypeFilter}
+                  onChange={e => {
+                    setNotifTypeFilter(e.target.value);
+                    setNotifDisplayLimit(12); // reset limit
+                  }}
+                  className="w-full p-2 bg-white border border-[#e5e5e0] rounded-xl text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-[#5A5A40]/30 text-gray-700"
+                >
+                  <option value="all">Todos os Tipos de Notificação</option>
+                  {Array.from(new Set(generatedNotifications.map(n => n.notification_type_name || n.notification_type_id))).map(typeName => (
+                    <option key={typeName} value={typeName}>{typeName}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Sorting */}
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-[#5A5A40]/70 block">Ordenar por</label>
+                <select
+                  value={notifSortOrder}
+                  onChange={e => {
+                    setNotifSortOrder(e.target.value as any);
+                  }}
+                  className="w-full p-2 bg-white border border-[#e5e5e0] rounded-xl text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-[#5A5A40]/30 text-gray-700"
+                >
+                  <option value="newest">Mais Recentes Primeiro</option>
+                  <option value="oldest">Mais Antigas Primeiro</option>
+                  <option value="pac_asc">PAC Notificado (A-Z)</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Clear filters shortcut indicator */}
+            {(notifSearch || notifStatusFilter !== 'all' || notifTypeFilter !== 'all') && (
+              <div className="flex items-center justify-between bg-[#5A5A40]/5 px-4 py-2.5 rounded-xl border border-[#5A5A40]/10 text-xs">
+                <span className="text-[#5A5A40] font-medium">Filtros ativos aplicados ao histórico.</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNotifSearch('');
+                    setNotifStatusFilter('all');
+                    setNotifTypeFilter('all');
+                    setNotifDisplayLimit(12);
+                  }}
+                  className="text-[11px] font-extrabold text-[#5A5A40] hover:underline uppercase tracking-wide cursor-pointer flex items-center gap-1"
+                >
+                  <X size={12} />
+                  Limpar Todos os Filtros
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Table or Responsive Cards list of all generated notifications */}
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-            {generatedNotifications.filter(n => {
-              if (!notifSearch) return true;
-              const matchPac = n.pac_name?.toLowerCase().includes(notifSearch.toLowerCase());
-              const matchType = n.notification_type_name?.toLowerCase().includes(notifSearch.toLowerCase());
-              const matchNotes = n.notes?.toLowerCase().includes(notifSearch.toLowerCase());
-              return matchPac || matchType || matchNotes;
-            }).map(item => {
+            {filteredAndSortedNotifications.slice(0, notifDisplayLimit).map(item => {
               const dateCreated = getJsDate(item.createdAt);
               const formattedDate = dateCreated ? format(dateCreated, "dd/MM/yyyy HH:mm", { locale: ptBR }) : '-';
               
@@ -1488,13 +1630,7 @@ export default function NotificationsPanel({
               );
             })}
 
-            {generatedNotifications.filter(n => {
-              if (!notifSearch) return true;
-              const matchPac = n.pac_name?.toLowerCase().includes(notifSearch.toLowerCase());
-              const matchType = n.notification_type_name?.toLowerCase().includes(notifSearch.toLowerCase());
-              const matchNotes = n.notes?.toLowerCase().includes(notifSearch.toLowerCase());
-              return matchPac || matchType || matchNotes;
-            }).length === 0 && (
+            {filteredAndSortedNotifications.length === 0 && (
               <div className="col-span-full text-center py-20 bg-white rounded-[32px] border border-dashed border-[#e5e5e0] flex flex-col items-center justify-center">
                 <BellOff className="text-gray-300 mb-4" size={48} />
                 <h4 className="font-bold text-gray-900">Nenhuma notificação encontrada</h4>
@@ -1502,6 +1638,19 @@ export default function NotificationsPanel({
               </div>
             )}
           </div>
+
+          {/* Load More Pagination Button */}
+          {filteredAndSortedNotifications.length > notifDisplayLimit && (
+            <div className="flex justify-center pt-4">
+              <button
+                type="button"
+                onClick={() => setNotifDisplayLimit(prev => prev + 12)}
+                className="px-6 py-2.5 bg-white border border-[#e5e5e0] hover:bg-gray-50 text-[#5A5A40] rounded-2xl text-xs font-bold shadow-sm transition-all"
+              >
+                Carregar Mais Notificações
+              </button>
+            </div>
+          )}
         </>
       )}
 
