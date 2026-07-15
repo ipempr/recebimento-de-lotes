@@ -104,6 +104,10 @@ export default function NotificationsPanel({
   const [viewingNotificationNotes, setViewingNotificationNotes] = useState('');
   const [notifToDelete, setNotifToDelete] = useState<string | null>(null);
 
+  // States for receiving defense
+  const [receivingDefenseForId, setReceivingDefenseForId] = useState<string | null>(null);
+  const [defenseTextInput, setDefenseTextInput] = useState<string>('');
+
   // Parse any Timestamp or date safely
   const getJsDate = (value: any): Date | null => {
     if (!value) return null;
@@ -172,10 +176,10 @@ export default function NotificationsPanel({
   // Group PACs with active nonconformity records
   const pacsWithNC = pacs.map(pac => {
     const pacBatches = activeNCBatches.filter(b => b.pac === pac.name || b.pac === pac.id);
-    const activeAndUndefendedBatches = pacBatches.filter(b => !isBatchDefended(b.id));
+    const activeAndUnnotifiedBatches = pacBatches.filter(b => !isBatchNotified(b.id));
     return {
       ...pac,
-      batches: activeAndUndefendedBatches
+      batches: activeAndUnnotifiedBatches
     };
   }).filter(p => p.batches.length > 0);
 
@@ -681,6 +685,13 @@ export default function NotificationsPanel({
   };
 
   const handleUpdateNotificationStatus = async (notifId: string, newStatus: string) => {
+    if (newStatus === 'DEFESA_RECEBIDA') {
+      const existing = generatedNotifications.find(n => n.id === notifId);
+      setReceivingDefenseForId(notifId);
+      setDefenseTextInput(existing?.defenseText || '');
+      return;
+    }
+
     try {
       const existing = generatedNotifications.find(n => n.id === notifId);
       if (!existing) return;
@@ -705,6 +716,41 @@ export default function NotificationsPanel({
     } catch (err: any) {
       console.error(err);
       alert("Erro ao atualizar status da notificação: " + err.message);
+    }
+  };
+
+  const handleSaveDefenseText = async () => {
+    if (!receivingDefenseForId) return;
+    try {
+      const existing = generatedNotifications.find(n => n.id === receivingDefenseForId);
+      if (!existing) return;
+
+      const updatedItem = {
+        ...existing,
+        status: 'DEFESA_RECEBIDA',
+        defenseText: defenseTextInput
+      };
+
+      if (isLocalMode) {
+        const updated = generatedNotifications.map(n => n.id === receivingDefenseForId ? updatedItem : n);
+        setGeneratedNotifications(updated);
+        localStorage.setItem('lotes_notifications', JSON.stringify(updated));
+      } else {
+        const docRef = doc(db, 'notifications', receivingDefenseForId);
+        await updateDoc(docRef, { 
+          status: 'DEFESA_RECEBIDA',
+          defenseText: defenseTextInput
+        });
+        setGeneratedNotifications(prev => prev.map(n => n.id === receivingDefenseForId ? updatedItem : n));
+      }
+
+      setReceivingDefenseForId(null);
+      setDefenseTextInput('');
+      setNotificationSuccess("Defesa recebida e registrada com sucesso!");
+      setTimeout(() => setNotificationSuccess(null), 3000);
+    } catch (err: any) {
+      console.error(err);
+      alert("Erro ao registrar defesa: " + err.message);
     }
   };
 
@@ -1367,6 +1413,41 @@ export default function NotificationsPanel({
                         <div className="bg-gray-50/70 p-2.5 rounded-xl border border-gray-100 mt-3 text-[11px] leading-relaxed italic text-gray-600">
                           <strong className="block text-[8px] font-extrabold uppercase text-gray-400 tracking-wider font-sans not-italic mb-0.5">Observações:</strong>
                           "{item.notes}"
+                        </div>
+                      )}
+
+                      {item.defenseText && (
+                        <div className="bg-emerald-50/50 p-2.5 rounded-xl border border-emerald-100 mt-3 text-[11px] leading-relaxed italic text-emerald-800">
+                          <div className="flex justify-between items-center mb-0.5">
+                            <strong className="block text-[8px] font-extrabold uppercase text-emerald-600 tracking-wider font-sans not-italic">Texto da Defesa Apresentada:</strong>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setReceivingDefenseForId(item.id);
+                                setDefenseTextInput(item.defenseText || '');
+                              }}
+                              className="text-[9px] font-bold text-emerald-700 hover:underline cursor-pointer"
+                            >
+                              Editar
+                            </button>
+                          </div>
+                          "{item.defenseText}"
+                        </div>
+                      )}
+
+                      {item.status === 'DEFESA_RECEBIDA' && !item.defenseText && (
+                        <div className="bg-amber-50/50 p-2.5 rounded-xl border border-amber-200 mt-3 text-[11px] leading-relaxed text-amber-800">
+                          <p className="text-[10px] font-medium mb-1.5">Nenhum texto de defesa foi registrado para esta notificação.</p>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setReceivingDefenseForId(item.id);
+                              setDefenseTextInput('');
+                            }}
+                            className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-[9px] font-extrabold uppercase transition-all shadow-sm cursor-pointer"
+                          >
+                            Incluir Texto da Defesa
+                          </button>
                         </div>
                       )}
 
@@ -2077,6 +2158,56 @@ export default function NotificationsPanel({
               >
                 <Trash2 size={13} />
                 Confirmar Exclusão
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Receber Defesa Modal */}
+      {receivingDefenseForId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-lg rounded-[32px] shadow-2xl overflow-hidden p-6 space-y-4 animate-in zoom-in duration-200 text-left">
+            <div className="flex items-center gap-3 border-b border-gray-100 pb-3">
+              <div className="w-10 h-10 bg-emerald-50 rounded-full flex items-center justify-center text-emerald-600">
+                <FileText size={20} />
+              </div>
+              <div>
+                <h4 className="text-lg font-bold text-gray-900 tracking-tight">Registrar Defesa Recebida</h4>
+                <p className="text-xs text-gray-500">Insira o texto/conteúdo da defesa apresentada para esta autuação.</p>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Conteúdo ou Justificativa da Defesa</label>
+              <textarea
+                value={defenseTextInput}
+                onChange={e => setDefenseTextInput(e.target.value)}
+                placeholder="Digite ou cole aqui os argumentos, justificativas ou detalhes da defesa recebida..."
+                rows={6}
+                className="w-full bg-gray-50 hover:bg-gray-100/70 focus:bg-white border border-gray-200 focus:border-[#5A5A40] focus:ring-1 focus:ring-[#5A5A40] rounded-2xl p-4 text-xs text-gray-800 outline-none transition-all resize-none"
+              />
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setReceivingDefenseForId(null);
+                  setDefenseTextInput('');
+                }}
+                className="flex-1 py-2.5 bg-gray-100 hover:bg-gray-200 transition-colors text-gray-700 text-xs font-bold rounded-xl"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveDefenseText}
+                disabled={!defenseTextInput.trim()}
+                className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 transition-colors text-white text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 shadow-md shadow-emerald-600/15"
+              >
+                <Check size={14} />
+                Registrar Defesa & Mudar Situação
               </button>
             </div>
           </div>
