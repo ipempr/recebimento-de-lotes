@@ -296,6 +296,28 @@ export function SystemTutorial() {
                 </div>
               </div>
 
+              {/* NEW FEATURES HIGHLIGHT */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="p-4 rounded-2xl border border-emerald-100 bg-emerald-50/40 text-emerald-950 text-xs space-y-1">
+                  <span className="font-bold text-emerald-800 block">🛡️ Filtro de Visibilidade de PACs</span>
+                  <p className="text-[11px] text-emerald-900/80 leading-relaxed">
+                    A tela de <b>PACs Pendentes</b> agora exibe apenas os postos com alta criticidade: lotes que atingiram <b>mais de 10% de não-conformidades</b> ou que contam com <b>atraso de entrega</b>. Isso mantém a mesa limpa e focada.
+                  </p>
+                </div>
+                <div className="p-4 rounded-2xl border border-emerald-100 bg-emerald-50/40 text-emerald-950 text-xs space-y-1">
+                  <span className="font-bold text-emerald-800 block">📝 Registro de Defesas</span>
+                  <p className="text-[11px] text-emerald-900/80 leading-relaxed">
+                    Ao mudar a Situação da Defesa para <b>"Defesa Recebida"</b>, o sistema abre um formulário dedicado para colar ou redigir a contestação oficial recebida. Esse texto fica salvo e visível no histórico de cada notificação.
+                  </p>
+                </div>
+                <div className="p-4 rounded-2xl border border-emerald-100 bg-emerald-50/40 text-emerald-950 text-xs space-y-1">
+                  <span className="font-bold text-emerald-800 block">🔍 Filtros & Histórico Avançado</span>
+                  <p className="text-[11px] text-emerald-900/80 leading-relaxed">
+                    A Central de Notificações Enviadas conta agora com filtros dinâmicos de <b>Situação</b> (Defesa Recebida, Aguardando, Retificada), de <b>Tipo de Ofício</b>, ordenação cronológica/alfabética e busca rápida de texto que pesquisa inclusive no conteúdo das defesas.
+                  </p>
+                </div>
+              </div>
+
               <div className="space-y-3.5">
                 <h4 className="text-xs font-bold text-gray-800">Passo a Passo para Notificar um Posto (PAC):</h4>
                 <ol className="space-y-2 text-xs text-gray-600 list-decimal pl-4.5">

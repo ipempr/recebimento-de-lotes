@@ -282,6 +282,24 @@ export default function NotificationsPanel({
     return total;
   };
 
+  // Filter pacsWithNC to only include those that reached more than 10% of non-conformities or have delay in delivery (ensaioForaDoPrazo)
+  const visiblePacsWithNC = useMemo(() => {
+    return pacsWithNC.filter(pac => {
+      return pac.batches.some((batch: any) => {
+        const totalNCs = getNonConconformitiesCount(batch.nonConformities);
+        const totalEnsaios = batch.numEnsaios || 0;
+        const percentage = totalEnsaios > 0 
+          ? (totalNCs / totalEnsaios) * 100 
+          : 0;
+        
+        const hasHighNC = percentage > 10;
+        const hasDelay = !!batch.ensaioForaDoPrazo;
+
+        return hasHighNC || hasDelay;
+      });
+    });
+  }, [pacsWithNC]);
+
   // Handle Generating notification with optional pre-selected recommended type
   const handleOpenGenerateModal = (pac: any, suggestedTypeId?: string) => {
     setGeneratingForPac(pac);
@@ -1090,7 +1108,7 @@ export default function NotificationsPanel({
           </div>
           <div>
             <p className="text-[11px] font-bold uppercase tracking-wider text-[#5A5A40]/70">PACs Pendentes</p>
-            <h3 className="text-2xl font-bold text-[#1a1a1a] mt-0.5">{pacsWithNC.length}</h3>
+            <h3 className="text-2xl font-bold text-[#1a1a1a] mt-0.5">{visiblePacsWithNC.length}</h3>
           </div>
         </div>
 
@@ -1126,7 +1144,7 @@ export default function NotificationsPanel({
               : "border-transparent text-[#5A5A40]/40 hover:text-[#5A5A40]/85"
           )}
         >
-          PACs Pendentes ({pacsWithNC.length})
+          PACs Pendentes ({visiblePacsWithNC.length})
         </button>
         <button
           onClick={() => setActiveSubTab('history')}
@@ -1155,7 +1173,7 @@ export default function NotificationsPanel({
 
           {/* PAC Cards Grid */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {pacsWithNC.map(pac => {
+            {visiblePacsWithNC.map(pac => {
               const pacHistory = generatedNotifications.filter(n => n.pac_id === pac.id || n.pac_name === pac.name);
               const activeHistory = expandedPacHistory[pac.id] || false;
 
@@ -1388,11 +1406,11 @@ export default function NotificationsPanel({
               );
             })}
 
-            {pacsWithNC.length === 0 && (
+            {visiblePacsWithNC.length === 0 && (
               <div className="col-span-full text-center py-24 bg-white rounded-[40px] border border-dashed border-[#e5e5e0]">
                 <Bell size={48} className="mx-auto mb-4 text-[#5A5A40]/30" />
-                <h4 className="text-lg font-display font-medium text-[#5A5A40] mb-1">Nenhum PAC com não-conformidades ativas</h4>
-                <p className="text-xs text-[#5A5A40]/60 max-w-sm mx-auto">Parabéns! Todos os lançamentos de lotes estão totalmente conformes e revisados no momento.</p>
+                <h4 className="text-lg font-display font-medium text-[#5A5A40] mb-1">Nenhum PAC com os critérios de notificação pendente</h4>
+                <p className="text-xs text-[#5A5A40]/60 max-w-sm mx-auto">Não há PACs pendentes que atingiram mais de 10% de não-conformidades ou que possuem atraso na entrega dos lotes.</p>
               </div>
             )}
           </div>
