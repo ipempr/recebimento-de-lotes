@@ -143,6 +143,11 @@ export default function NotificationsPanel({
     return d ? format(d, "dd/MM/yyyy", { locale: ptBR }) : '-';
   };
 
+  const formatDateLong = (value: any) => {
+    const d = getJsDate(value);
+    return d ? format(d, "dd 'de' MMMM 'de' yyyy", { locale: ptBR }) : '-';
+  };
+
   const isBatchDefended = (batchId: string) => {
     return (generatedNotifications || []).some(n => 
       n.status === 'DEFESA_RECEBIDA' && 
@@ -644,7 +649,7 @@ export default function NotificationsPanel({
 
     const compilePlaceholders = (text: string) => {
       if (!text) return '';
-      return text
+      let result = text
         .replace(/{pac_name}/g, pacRazaoSocial)
         .replace(/{pac_nome}/g, pacRazaoSocial)
         .replace(/{razao_social}/g, pacRazaoSocial)
@@ -655,7 +660,19 @@ export default function NotificationsPanel({
         .replace(/{placas_nao_conformes}/g, platesJoinedFormatted)
         .replace(/{motivo_detalhes}/g, reasonsJoinedFormatted)
         .replace(/{lotes_detalhes}/g, lotesDetalhesString)
-        .replace(/{data_atual}/g, formatDateShort(item.createdAt || new Date()));
+        .replace(/{data_atual}/g, formatDateShort(item.createdAt || new Date()))
+        .replace(/{data_atual_extenso}/g, formatDateLong(item.createdAt || new Date()))
+        .replace(/{data_geracao}/g, formatDateLong(item.createdAt || new Date()))
+        .replace(/{data_geracao_extenso}/g, formatDateLong(item.createdAt || new Date()));
+
+      // Automatically fix any hardcoded dates (e.g. "de 02 de julho de 2026" or "de 02/07/2026") in the process header or text to be the actual generation date
+      const generationDateLong = formatDateLong(item.createdAt || new Date());
+      const generationDateShort = formatDateShort(item.createdAt || new Date());
+      result = result
+        .replace(/\bde\s+\d{1,2}\s+de\s+[a-zA-ZçÇ\u00C0-\u00FF]+\s+de\s+\d{4}\b/gi, 'de ' + generationDateLong)
+        .replace(/\bde\s+\d{1,2}\/\d{1,2}\/\d{4}\b/gi, 'de ' + generationDateShort);
+
+      return result;
     };
 
     if (item.customOficioTitle !== undefined) {

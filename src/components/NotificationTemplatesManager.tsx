@@ -109,7 +109,7 @@ export default function NotificationTemplatesManager({
   // Local template editor states
   const [oficioTitle, setOficioTitle] = useState('NOTIFICAÇÃO DE AUTUAÇÃO');
   const [oficioSignatureId, setOficioSignatureId] = useState<string>('');
-  const [oficioProcessHeader, setOficioProcessHeader] = useState('Processo IPEM-PR 52603.000007/2026-31\nde 02 de julho de 2026.');
+  const [oficioProcessHeader, setOficioProcessHeader] = useState('Processo IPEM-PR 52603.000007/2026-31\nde {data_atual_extenso}.');
   const [oficioIntro, setOficioIntro] = useState('O Instituto de Pesos e Medidas do Paraná - IPEM-PR abriu um processo administrativo contra:');
   const [oficioSections, setOficioSections] = useState<any[]>([
     { id: '1', icon: 'search', title: 'MOTIVO', content: 'Identificamos irregularidades técnicas ou administrativas nos lotes sob vossa responsabilidade:\n\nRelação de Lotes Envolvidos:\n{lotes_detalhes}\n\nNo total acumulado, composto de {total_ensaios} ensaios, identificamos {erros_encontrados} desvios, o que corresponde a um percentual de irregularidade de {percentual_erro}%.\n\nRelação de placas com não-conformidades encontradas:\n{placas_nao_conformes}' },
@@ -259,7 +259,7 @@ export default function NotificationTemplatesManager({
 
   const resetTemplatesToDefault = () => {
     setOficioTitle('NOTIFICAÇÃO DE AUTUAÇÃO');
-    setOficioProcessHeader('Processo IPEM-PR 52603.000007/2026-31\nde 02 de julho de 2026.');
+    setOficioProcessHeader('Processo IPEM-PR 52603.000007/2026-31\nde {data_atual_extenso}.');
     setOficioIntro('O Instituto de Pesos e Medidas do Paraná - IPEM-PR abriu um processo administrativo contra:');
     setOficioSections([
       { id: '1', icon: 'search', title: 'MOTIVO', content: 'Identificamos irregularidades técnicas ou administrativas nos lotes sob vossa responsabilidade:\n\nRelação de Lotes Envolvidos:\n{lotes_detalhes}\n\nNo total acumulado, composto de {total_ensaios} ensaios, identificamos {erros_encontrados} desvios, o que corresponde a um percentual de irregularidade de {percentual_erro}%.\n\nRelação de placas com não-conformidades encontradas:\n{placas_nao_conformes}' },
@@ -946,6 +946,10 @@ export default function NotificationTemplatesManager({
                 <div className="flex items-center gap-2 bg-white/70 px-2 py-1.5 rounded-xl border border-[#C49B2A]/20 bg-amber-50/20 col-span-full">
                   <span className="font-mono font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded">{"{data_atual}"}</span>
                   <span className="text-gray-500 text-[10px]">Data de hoje (DD/MM/AAAA)</span>
+                </div>
+                <div className="flex items-center gap-2 bg-white/70 px-2 py-1.5 rounded-xl border border-[#C49B2A]/20 bg-amber-50/20 col-span-full">
+                  <span className="font-mono font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded">{"{data_atual_extenso}"}</span>
+                  <span className="text-gray-500 text-[10px]">Data de hoje por extenso (Ex: 17 de julho de 2026)</span>
                 </div>
               </div>
             </div>
