@@ -27,7 +27,8 @@ import {
   Phone,
   Sparkles,
   Eye,
-  BellOff
+  BellOff,
+  FileCheck
 } from 'lucide-react';
 import { collection, addDoc, serverTimestamp, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -113,6 +114,7 @@ export default function NotificationsPanel({
   // States for receiving defense
   const [receivingDefenseForId, setReceivingDefenseForId] = useState<string | null>(null);
   const [defenseTextInput, setDefenseTextInput] = useState<string>('');
+  const [viewingReceiptForNotif, setViewingReceiptForNotif] = useState<any | null>(null);
 
   // Parse any Timestamp or date safely
   const getJsDate = (value: any): Date | null => {
@@ -815,10 +817,12 @@ export default function NotificationsPanel({
       const existing = generatedNotifications.find(n => n.id === receivingDefenseForId);
       if (!existing) return;
 
+      const receivedDate = new Date().toISOString();
       const updatedItem = {
         ...existing,
         status: 'DEFESA_RECEBIDA',
-        defenseText: defenseTextInput
+        defenseText: defenseTextInput,
+        defenseReceivedAt: receivedDate
       };
 
       if (isLocalMode) {
@@ -829,7 +833,8 @@ export default function NotificationsPanel({
         const docRef = doc(db, 'notifications', receivingDefenseForId);
         await updateDoc(docRef, { 
           status: 'DEFESA_RECEBIDA',
-          defenseText: defenseTextInput
+          defenseText: defenseTextInput,
+          defenseReceivedAt: receivedDate
         });
         setGeneratedNotifications(prev => prev.map(n => n.id === receivingDefenseForId ? updatedItem : n));
       }
@@ -838,6 +843,9 @@ export default function NotificationsPanel({
       setDefenseTextInput('');
       setNotificationSuccess("Defesa recebida e registrada com sucesso!");
       setTimeout(() => setNotificationSuccess(null), 3000);
+      
+      // Auto-open receipt modal to print the delivery proof
+      setViewingReceiptForNotif(updatedItem);
     } catch (err: any) {
       console.error(err);
       alert("Erro ao registrar defesa: " + err.message);
@@ -1652,6 +1660,17 @@ export default function NotificationsPanel({
                       <Eye size={13} />
                       Consultar & Retificar
                     </button>
+                    {item.status === 'DEFESA_RECEBIDA' && (
+                      <button
+                        type="button"
+                        onClick={() => setViewingReceiptForNotif(item)}
+                        className="py-2 px-3 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold transition-all flex items-center justify-center gap-1"
+                        title="Emitir Comprovante de Entrega de Defesa (NIT-DICOL-014)"
+                      >
+                        <FileCheck size={13} />
+                        Comprovante
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => setNotifToDelete(item.id)}
@@ -2397,6 +2416,380 @@ export default function NotificationsPanel({
           </div>
         </div>
       )}
+
+      {/* Comprovante de Entrega de Defesa Modal (NIT-DICOL-014) */}
+      {viewingReceiptForNotif && (() => {
+        const targetPac = pacs.find(p => p.id === viewingReceiptForNotif.pac_id || p.name === viewingReceiptForNotif.pac_name);
+        const pacCNPJ = targetPac?.cnpj || '';
+        const pacRazaoSocial = targetPac?.razaoSocial || targetPac?.name || viewingReceiptForNotif.pac_name || '';
+        const protocolNumber = `DEF-${viewingReceiptForNotif.id ? viewingReceiptForNotif.id.substring(0, 8).toUpperCase() : 'NEW'}-${new Date(viewingReceiptForNotif.defenseReceivedAt || new Date()).getFullYear()}`;
+        const validationHash = `SGN-${viewingReceiptForNotif.id ? viewingReceiptForNotif.id.substring(0, 12).toUpperCase() : 'VALID'}-${Math.abs(viewingReceiptForNotif.id ? viewingReceiptForNotif.id.split('').reduce((a: number, b: string) => { return (a << 5) - a + b.charCodeAt(0) | 0 }, 0) : 1014)}`;
+
+        const handlePrint = () => {
+          // Open a clean printable layout in a new temporary blank screen
+          const printWindow = window.open('', '_blank');
+          if (!printWindow) {
+            alert("Por favor, permita pop-ups para imprimir o comprovante.");
+            return;
+          }
+
+          const printHtml = `
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <title>Comprovante de Entrega de Defesa Administrativa - IPEM-PR</title>
+              <style>
+                body {
+                  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+                  color: #1a1a1a;
+                  line-height: 1.5;
+                  padding: 40px;
+                  background: #fff;
+                }
+                .container {
+                  max-width: 800px;
+                  margin: 0 auto;
+                  border: 2px solid #e5e5e0;
+                  padding: 40px;
+                  border-radius: 16px;
+                }
+                .header {
+                  display: flex;
+                  align-items: center;
+                  justify-content: space-between;
+                  border-b: 2px solid #e5e5e0;
+                  padding-bottom: 20px;
+                  margin-bottom: 30px;
+                }
+                .header-logo-text {
+                  flex: 1;
+                }
+                .gov-title {
+                  font-size: 11px;
+                  font-weight: 800;
+                  text-transform: uppercase;
+                  letter-spacing: 0.1em;
+                  color: #5A5A40;
+                  margin: 0;
+                }
+                .dept-title {
+                  font-size: 18px;
+                  font-weight: 800;
+                  color: #1a1a1a;
+                  margin: 2px 0 0 0;
+                }
+                .sub-dept {
+                  font-size: 10px;
+                  font-weight: 600;
+                  text-transform: uppercase;
+                  color: #666;
+                  margin: 2px 0 0 0;
+                }
+                .protocol-box {
+                  text-align: right;
+                  background: #fcfcf9;
+                  border: 1px solid #e5e5e0;
+                  padding: 12px 18px;
+                  border-radius: 12px;
+                }
+                .protocol-label {
+                  font-size: 9px;
+                  font-weight: 800;
+                  text-transform: uppercase;
+                  color: #5A5A40;
+                }
+                .protocol-val {
+                  font-size: 16px;
+                  font-weight: 800;
+                  color: #047857;
+                  font-family: monospace;
+                }
+                .doc-title {
+                  text-align: center;
+                  font-size: 15px;
+                  font-weight: 800;
+                  text-transform: uppercase;
+                  margin: 30px 0;
+                  letter-spacing: 0.05em;
+                  border-bottom: 1px solid #e5e5e0;
+                  border-top: 1px solid #e5e5e0;
+                  padding: 10px 0;
+                }
+                .grid {
+                  display: grid;
+                  grid-template-columns: 150px 1fr;
+                  gap: 12px;
+                  font-size: 12px;
+                  margin-bottom: 30px;
+                }
+                .label {
+                  font-weight: 700;
+                  color: #5A5A40;
+                  text-transform: uppercase;
+                  font-size: 10px;
+                }
+                .val {
+                  color: #1a1a1a;
+                }
+                .defense-box {
+                  background: #f9f9f6;
+                  border: 1px solid #e5e5e0;
+                  border-radius: 12px;
+                  padding: 20px;
+                  font-size: 12px;
+                  white-space: pre-wrap;
+                  margin-bottom: 30px;
+                  font-family: 'JetBrains Mono', monospace;
+                  max-height: 400px;
+                  overflow-y: auto;
+                }
+                .footer {
+                  border-top: 1px solid #e5e5e0;
+                  padding-top: 25px;
+                  display: flex;
+                  justify-content: space-between;
+                  align-items: flex-end;
+                  font-size: 11px;
+                }
+                .footer-text {
+                  color: #666;
+                  max-width: 450px;
+                }
+                .signature-box {
+                  text-align: center;
+                  width: 220px;
+                }
+                .signature-line {
+                  border-top: 1px solid #1a1a1a;
+                  margin-top: 50px;
+                  padding-top: 5px;
+                  font-weight: bold;
+                  font-size: 10px;
+                  text-transform: uppercase;
+                }
+                .stamp {
+                  font-size: 9px;
+                  color: #999;
+                }
+                .hash-box {
+                  font-family: monospace;
+                  font-size: 10px;
+                  color: #666;
+                  margin-top: 15px;
+                  background: #f3f3ee;
+                  padding: 6px;
+                  border-radius: 6px;
+                  display: inline-block;
+                }
+              </style>
+            </head>
+            <body>
+              <div class="container">
+                <div class="header">
+                  <div class="header-logo-text">
+                    <p class="gov-title">Estado do Paraná</p>
+                    <p class="dept-title">IPEM-PR</p>
+                    <p class="sub-dept">Instituto de Pesos e Medidas do Paraná • Órgão Delegado do INMETRO</p>
+                    <p class="sub-dept" style="font-weight: 800; color: #5A5A40;">Departamento de Avaliação Técnica - DATE</p>
+                  </div>
+                  <div class="protocol-box">
+                    <span class="protocol-label">Protocolo de Defesa</span>
+                    <div class="protocol-val">${protocolNumber}</div>
+                  </div>
+                </div>
+
+                <div class="doc-title">
+                  Comprovante de Entrega de Defesa Administrativa<br>
+                  <span style="font-size: 11px; font-weight: normal; text-transform: none; color: #666;">
+                    Emitido em conformidade com as diretrizes de integridade processual da <strong>NIT-DICOL-014</strong>
+                  </span>
+                </div>
+
+                <div class="grid">
+                  <div class="label">Interessado (PAC)</div>
+                  <div class="val" style="font-weight: bold;">${pacRazaoSocial}</div>
+
+                  <div class="label">CNPJ / CPF</div>
+                  <div class="val">${pacCNPJ || 'Não informado'}</div>
+
+                  <div class="label">Notificação de Ref.</div>
+                  <div class="val">#${viewingReceiptForNotif.id ? viewingReceiptForNotif.id.substring(0, 10).toUpperCase() : '-'} (${viewingReceiptForNotif.notification_type_name || 'Autuação'})</div>
+
+                  <div class="label">Processo IPEM-PR</div>
+                  <div class="val">${viewingReceiptForNotif.customOficioProcess || viewingReceiptForNotif.id || '-'}</div>
+
+                  <div class="label">Data de Emissão</div>
+                  <div class="val">${formatDateShort(viewingReceiptForNotif.createdAt)}</div>
+
+                  <div class="label">Data de Recebimento</div>
+                  <div class="val" style="font-weight: bold; color: #047857;">${formatDateTime(viewingReceiptForNotif.defenseReceivedAt || new Date())}</div>
+                </div>
+
+                <div class="label" style="margin-bottom: 8px;">Teor da Defesa Registrada</div>
+                <div class="defense-box">${viewingReceiptForNotif.defenseText || '(Nenhum texto de defesa informado)'}</div>
+
+                <div class="footer">
+                  <div class="footer-text">
+                    <p style="margin: 0; font-weight: bold;">Declaração de Validade Processual</p>
+                    <p style="margin: 4px 0 0 0; color: #555; leading-relaxed: 1.4;">
+                      O Departamento de Avaliação Técnica do IPEM-PR certifica para os devidos fins regulamentares e processuais que a petição de defesa retro citada foi devidamente protocolada e recebida por via eletrônica. A tempestividade e o teor dos dados declarados foram autenticados de acordo com a NIT-DICOL-014.
+                    </p>
+                    <div class="hash-box">
+                      CÓD. VALIDAÇÃO: ${validationHash}
+                    </div>
+                  </div>
+                  <div class="signature-box">
+                    <div class="signature-line">Protocolo Eletrônico</div>
+                    <div class="stamp">Sistema SGN - IPEM-PR</div>
+                  </div>
+                </div>
+              </div>
+              <script>
+                window.onload = function() {
+                  window.print();
+                }
+              </script>
+            </body>
+            </html>
+          `;
+
+          printWindow.document.write(printHtml);
+          printWindow.document.close();
+        };
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="bg-white w-full max-w-2xl rounded-[32px] shadow-2xl overflow-hidden animate-in zoom-in duration-200 flex flex-col max-h-[90vh]">
+              
+              {/* Header */}
+              <div className="p-6 border-b border-gray-100 flex items-center justify-between bg-emerald-50/50">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-emerald-500 rounded-full flex items-center justify-center text-white">
+                    <FileCheck size={20} />
+                  </div>
+                  <div>
+                    <h3 className="font-display font-bold text-lg text-emerald-950">Comprovante de Defesa</h3>
+                    <p className="text-xs text-emerald-800/70 font-semibold uppercase tracking-wider">NIT-DICOL-014 • IPEM-PR</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setViewingReceiptForNotif(null)}
+                  className="p-1.5 hover:bg-emerald-100/50 text-emerald-800 rounded-full transition-colors cursor-pointer"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {/* Document Sheet Container */}
+              <div className="p-8 overflow-y-auto flex-1 space-y-6">
+                
+                {/* Official Stamp Lookalike */}
+                <div className="border-2 border-[#e5e5e0] p-6 rounded-2xl relative bg-white shadow-sm space-y-5">
+                  <div className="flex flex-col md:flex-row justify-between gap-4 border-b border-gray-100 pb-4">
+                    <div className="space-y-1">
+                      <p className="text-[10px] font-extrabold uppercase tracking-wider text-[#5A5A40]">Estado do Paraná</p>
+                      <h4 className="text-xl font-bold text-gray-900 tracking-tight">IPEM-PR</h4>
+                      <p className="text-[10px] text-gray-500 font-medium">Instituto de Pesos e Medidas do Paraná • Órgão Delegado do INMETRO</p>
+                      <p className="text-[10px] font-bold text-[#5A5A40]">Departamento de Avaliação Técnica - DATE</p>
+                    </div>
+                    <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-right flex flex-col justify-center min-w-[180px]">
+                      <span className="text-[8px] font-bold uppercase tracking-wider text-emerald-700 block">Número do Protocolo</span>
+                      <span className="font-mono text-sm font-extrabold text-emerald-800">{protocolNumber}</span>
+                    </div>
+                  </div>
+
+                  {/* Receipt metadata list */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3.5 text-xs">
+                    <div>
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block">Interessado (PAC)</span>
+                      <span className="font-bold text-gray-800">{pacRazaoSocial}</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block">CNPJ / CPF</span>
+                      <span className="font-mono font-semibold text-gray-700">{pacCNPJ || 'Não informado'}</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block">Notificação Relacionada</span>
+                      <span className="font-semibold text-gray-700">#{viewingReceiptForNotif.id ? viewingReceiptForNotif.id.substring(0, 10).toUpperCase() : ''} ({viewingReceiptForNotif.notification_type_name || 'Autuação'})</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block">Data/Hora de Protocolo</span>
+                      <span className="font-bold text-emerald-700">{formatDateTime(viewingReceiptForNotif.defenseReceivedAt || new Date())}</span>
+                    </div>
+                  </div>
+
+                  {/* Defense text box */}
+                  <div className="space-y-1.5 pt-2">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block">Teor da Defesa Apresentada</span>
+                    <div className="bg-gray-50 hover:bg-gray-50/80 transition-colors p-4 rounded-xl border border-gray-100 text-xs font-mono text-gray-800 max-h-40 overflow-y-auto whitespace-pre-wrap leading-relaxed">
+                      {viewingReceiptForNotif.defenseText || '(Nenhum texto de defesa informado)'}
+                    </div>
+                  </div>
+
+                  {/* Legalese validation text */}
+                  <div className="pt-3 border-t border-gray-100 flex flex-col md:flex-row gap-4 justify-between items-end">
+                    <div className="space-y-1">
+                      <p className="text-[10px] font-bold text-gray-700">Declaração de Validade Processual</p>
+                      <p className="text-[10px] text-gray-500 leading-relaxed max-w-md">
+                        O Departamento de Avaliação Técnica do IPEM-PR certifica para os devidos fins processuais que a petição de defesa retro citada foi devidamente protocolada por via eletrônica. A tempestividade e os dados declarados foram autenticados de acordo com a NIT-DICOL-014.
+                      </p>
+                    </div>
+                    <div className="text-right space-y-1 min-w-[150px]">
+                      <span className="text-[8px] font-bold text-gray-400 uppercase tracking-widest block">Código de Autenticidade</span>
+                      <span className="font-mono text-[9px] bg-gray-100 px-2 py-1 rounded text-gray-600 block text-center truncate">
+                        {validationHash}
+                      </span>
+                    </div>
+                  </div>
+
+                </div>
+
+                {/* Print Notice Banner */}
+                <div className="bg-amber-50/50 p-4 rounded-2xl border border-amber-200 text-amber-900 text-xs flex items-start gap-2.5">
+                  <Info className="text-amber-700 shrink-0 mt-0.5" size={15} />
+                  <p className="leading-relaxed">
+                    <strong>Atenção:</strong> De acordo com a NIT-DICOL-014, o PAC notificado deve receber uma cópia impressa ou digital deste comprovante de protocolo para fins de acompanhamento processual e garantia de contraditório tempestivo.
+                  </p>
+                </div>
+
+              </div>
+
+              {/* Actions Footer */}
+              <div className="p-6 border-t border-gray-100 flex gap-3 bg-gray-50">
+                <button
+                  type="button"
+                  onClick={() => setViewingReceiptForNotif(null)}
+                  className="flex-1 py-2.5 bg-white border border-gray-200 hover:bg-gray-100 transition-colors text-gray-700 text-xs font-bold rounded-xl"
+                >
+                  Fechar Janela
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const fullText = `COMPROVANTE DE ENTREGA DE DEFESA ADMINISTRATIVA\nNIT-DICOL-014 • IPEM-PR\n\nProtocolo: ${protocolNumber}\nInteressado: ${pacRazaoSocial}\nCNPJ/CPF: ${pacCNPJ}\nNotificação: #${viewingReceiptForNotif.id ? viewingReceiptForNotif.id.substring(0, 10).toUpperCase() : ''}\nData de Protocolo: ${formatDateTime(viewingReceiptForNotif.defenseReceivedAt || new Date())}\nChave de Validação: ${validationHash}\n\nTeor da Defesa:\n${viewingReceiptForNotif.defenseText}`;
+                    navigator.clipboard.writeText(fullText);
+                    alert("Comprovante copiado para a área de transferência!");
+                  }}
+                  className="px-4 py-2.5 bg-emerald-50 hover:bg-emerald-100 transition-colors text-emerald-800 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5"
+                >
+                  <Copy size={14} />
+                  Copiar Dados
+                </button>
+                <button
+                  type="button"
+                  onClick={handlePrint}
+                  className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 transition-colors text-white text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 shadow-md shadow-emerald-600/15"
+                >
+                  <Printer size={14} />
+                  Imprimir Comprovante
+                </button>
+              </div>
+
+            </div>
+          </div>
+        );
+      })()}
 
     </div>
   );
