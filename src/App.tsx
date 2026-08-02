@@ -58,11 +58,13 @@ import {
   BookOpen,
   Lock,
   Eye,
-  EyeOff
+  EyeOff,
+  ShieldCheck,
+  FileCheck
 } from 'lucide-react';
 import { format, addDays, differenceInDays, isAfter, isBefore, startOfDay, parse } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { read, utils } from 'xlsx';
+import { read, utils, writeFile } from 'xlsx';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import {
@@ -1569,7 +1571,7 @@ export default function App() {
             </div>
           </>
         ) : activeTab === 'stats' ? (
-          <StatsPanel batches={batches} collaborators={collaborators} pacs={pacs} />
+          <StatsPanel batches={batches} collaborators={collaborators} pacs={pacs} nonConformityRecords={nonConformityRecords} isLocalMode={isLocalMode} />
         ) : activeTab === 'notifications' ? (
           <NotificationsPanel 
             batches={batches}
@@ -4679,7 +4681,7 @@ function ConfigPanel({
 );
 }
 
-function StatsPanel({ batches, collaborators, pacs }: { batches: any[]; collaborators: any[]; pacs: any[] }) {
+function StatsPanel({ batches, collaborators, pacs, nonConformityRecords, isLocalMode }: { batches: any[]; collaborators: any[]; pacs: any[]; nonConformityRecords?: any[]; isLocalMode?: boolean }) {
   // Default filter dates: last 30 days
   const defaultStatsStart = useMemo(() => format(addDays(new Date(), -30), 'yyyy-MM-dd'), []);
   const defaultStatsEnd = useMemo(() => format(new Date(), 'yyyy-MM-dd'), []);
@@ -5076,6 +5078,15 @@ function StatsPanel({ batches, collaborators, pacs }: { batches: any[]; collabor
         </div>
       </div>
 
+      {/* Seção de Conformidade dos PACs (Sem Não Conformidades ou Atrasos) */}
+      <PacComplianceSection
+        batches={batches}
+        pacs={pacs}
+        nonConformityRecords={nonConformityRecords}
+        statsStartDate={statsStartDate}
+        statsEndDate={statsEndDate}
+      />
+
       {/* Seção de Produtividade por PAC */}
       <PacProductivitySection 
         batches={batches} 
@@ -5085,6 +5096,509 @@ function StatsPanel({ batches, collaborators, pacs }: { batches: any[]; collabor
         defaultStatsStart={defaultStatsStart} 
         defaultStatsEnd={defaultStatsEnd} 
       />
+    </div>
+  );
+}
+
+interface PacComplianceSectionProps {
+  batches: any[];
+  pacs: any[];
+  nonConformityRecords?: any[];
+  statsStartDate: string;
+  statsEndDate: string;
+}
+
+function PacComplianceSection({
+  batches,
+  pacs,
+  nonConformityRecords = [],
+  statsStartDate,
+  statsEndDate
+}: PacComplianceSectionProps) {
+  const [complianceTab, setComplianceTab] = useState<'compliant' | 'nonCompliant' | 'all'>('compliant');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [copied, setCopied] = useState(false);
+  const [selectedPacForModal, setSelectedPacForModal] = useState<any | null>(null);
+
+  // Compute compliance per PAC in the selected period
+  const pacMetrics = useMemo(() => {
+    const configPacNames = (pacs || []).map((p: any) => p.name || p.id).filter(Boolean);
+    const batchPacNames = (batches || []).map((b: any) => b.pac).filter(Boolean);
+    const allPacNames = Array.from(new Set([...configPacNames, ...batchPacNames])).sort((a, b) => a.localeCompare(b));
+
+    const startDate = statsStartDate ? startOfDay(parseLocalDate(statsStartDate)) : null;
+    const endDate = statsEndDate ? startOfDay(parseLocalDate(statsEndDate)) : null;
+
+    // Filter batches belonging to the selected statistics period
+    const periodBatches = batches.filter(b => {
+      const dateObj = b.recebidoEm ? b.recebidoEm.toDate() : (b.periodoInicial ? b.periodoInicial.toDate() : null);
+      if (!dateObj) return false;
+      if (startDate && dateObj < startDate) return false;
+      if (endDate && startOfDay(dateObj) > endDate) return false;
+      return true;
+    });
+
+    const results = allPacNames.map(pacName => {
+      const pacBatches = periodBatches.filter(b => b.pac === pacName);
+      const totalBatches = pacBatches.length;
+      let totalEnsaiosDelivered = 0;
+      let totalEnsaios = 0;
+
+      let ncCount = 0;
+      let delayCount = 0;
+
+      pacBatches.forEach(b => {
+        const numEns = b.numEnsaios || 0;
+        totalEnsaios += numEns;
+
+        const isFinished = (b.conferidoPor && b.conferidoPor.trim() !== '') || b.status === 'FINALIZADO';
+        if (isFinished) {
+          totalEnsaiosDelivered += numEns;
+        }
+
+        // Check NCs strictly linked to this batch ID
+        const ncListLocal = b.nonConformities || [];
+        const ncListFirestore = (nonConformityRecords || []).filter((nc: any) => nc.recebimento_lote_id === b.id);
+        const batchNCs = ncListLocal.length > 0 ? ncListLocal : ncListFirestore;
+
+        if (batchNCs.length > 0) {
+          ncCount += batchNCs.length;
+        }
+
+        // Check Delays
+        const deadline = b.periodoInicial ? addDays(b.periodoInicial.toDate(), 30) : null;
+        const isFinishedLate = isFinished && b.conferidoEm && deadline && isAfter(b.conferidoEm.toDate(), deadline);
+        const isOpenLate = !isFinished && deadline && isAfter(new Date(), deadline);
+        const isMarkedLate = b.ensaioForaDoPrazo === true || b.status === 'ATRASO';
+
+        if (isFinishedLate || isOpenLate || isMarkedLate) {
+          delayCount++;
+        }
+      });
+
+      const isFullyCompliant = ncCount === 0 && delayCount === 0;
+
+      return {
+        pac: pacName,
+        totalBatches,
+        totalEnsaios,
+        totalEnsaiosDelivered,
+        ncCount,
+        delayCount,
+        isFullyCompliant,
+        pacBatches
+      };
+    });
+
+    const activePacs = results.filter(r => r.totalBatches > 0);
+    const compliantPacs = activePacs.filter(r => r.isFullyCompliant);
+    const nonCompliantPacs = activePacs.filter(r => !r.isFullyCompliant);
+
+    return {
+      allResults: results,
+      activePacs,
+      compliantPacs,
+      nonCompliantPacs,
+      totalActivePacsCount: activePacs.length,
+      compliantPacsCount: compliantPacs.length,
+      nonCompliantPacsCount: nonCompliantPacs.length,
+      compliancePercentage: activePacs.length > 0 ? Math.round((compliantPacs.length / activePacs.length) * 100) : 100,
+      totalEnsaiosCompliant: compliantPacs.reduce((acc, p) => acc + p.totalEnsaios, 0)
+    };
+  }, [pacs, batches, nonConformityRecords, statsStartDate, statsEndDate]);
+
+  // Filter list based on selected complianceTab and search string
+  const displayedPacs = useMemo(() => {
+    let list = pacMetrics.activePacs;
+    if (complianceTab === 'compliant') {
+      list = pacMetrics.compliantPacs;
+    } else if (complianceTab === 'nonCompliant') {
+      list = pacMetrics.nonCompliantPacs;
+    }
+
+    if (searchTerm.trim()) {
+      const term = searchTerm.toLowerCase().trim();
+      list = list.filter(item => item.pac.toLowerCase().includes(term));
+    }
+
+    return list;
+  }, [pacMetrics, complianceTab, searchTerm]);
+
+  // Export excel handler
+  const handleExportExcel = () => {
+    const listToExport = complianceTab === 'compliant' ? pacMetrics.compliantPacs : complianceTab === 'nonCompliant' ? pacMetrics.nonCompliantPacs : pacMetrics.activePacs;
+    
+    const exportData = listToExport.map(item => ({
+      'PAC': item.pac,
+      'Lotes no Período': item.totalBatches,
+      'Ensaios Entregues': item.totalEnsaios,
+      'Não Conformidades': item.ncCount,
+      'Atrasos de Entrega': item.delayCount,
+      'Status de Conformidade': item.isFullyCompliant ? '100% CONFORME (SEM NC / SEM ATRASO)' : 'COM OCORRÊNCIA'
+    }));
+
+    const ws = utils.json_to_sheet(exportData);
+    const wb = utils.book_new();
+    utils.book_append_sheet(wb, ws, 'PACs Conformidade');
+    
+    const startStr = statsStartDate || 'inicio';
+    const endStr = statsEndDate || 'fim';
+    writeFile(wb, `Relacao_PACs_Conformidade_${startStr}_ate_${endStr}.xlsx`);
+  };
+
+  // Copy list handler
+  const handleCopyList = () => {
+    const startStr = statsStartDate ? format(parseLocalDate(statsStartDate), 'dd/MM/yyyy') : 'Início';
+    const endStr = statsEndDate ? format(parseLocalDate(statsEndDate), 'dd/MM/yyyy') : 'Fim';
+    
+    const lines = [
+      `RELAÇÃO DE PACS SEM NÃO CONFORMIDADES E SEM ATRASOS DE ENTREGA`,
+      `Período Analisado: ${startStr} até ${endStr}`,
+      `Total de PACs Conformes: ${pacMetrics.compliantPacsCount} de ${pacMetrics.totalActivePacsCount} (${pacMetrics.compliancePercentage}%)`,
+      `Volume Total de Ensaios Conformes: ${pacMetrics.totalEnsaiosCompliant.toLocaleString('pt-BR')}`,
+      `--------------------------------------------------`,
+      ...pacMetrics.compliantPacs.map((p, idx) => 
+        `${idx + 1}. ${p.pac} -> ${p.totalEnsaios.toLocaleString('pt-BR')} ensaios entregues em ${p.totalBatches} lote(s) [0 NC / 0 Atrasos]`
+      )
+    ].join('\n');
+
+    navigator.clipboard.writeText(lines);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2500);
+  };
+
+  return (
+    <div className="bg-white rounded-[32px] p-8 border border-[#e5e5e0] mt-8 space-y-6">
+      {/* Header */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-[#f5f5f0] pb-6">
+        <div>
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-emerald-50 rounded-2xl text-emerald-700">
+              <ShieldCheck size={26} />
+            </div>
+            <div>
+              <h3 className="text-xl font-display font-bold tracking-tight text-gray-900">
+                PACs sem Não Conformidades ou Atrasos
+              </h3>
+              <p className="text-xs text-[#5A5A40]/70 mt-0.5">
+                Relação detalhada dos PACs com 100% de conformidade operacional e sem atrasos de entrega no período selecionado.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Actions */}
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={handleExportExcel}
+            className="inline-flex items-center gap-2 px-4 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer"
+          >
+            <FileSpreadsheet size={15} />
+            Exportar Excel (.xlsx)
+          </button>
+          <button
+            onClick={handleCopyList}
+            className="inline-flex items-center gap-2 px-4 py-2.5 bg-[#f5f5f0] hover:bg-gray-200 text-[#5A5A40] rounded-xl text-xs font-bold transition-all cursor-pointer"
+          >
+            <Copy size={15} />
+            {copied ? 'Copiado!' : 'Copiar Relação'}
+          </button>
+        </div>
+      </div>
+
+      {/* KPI Summary Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="bg-emerald-50/70 border border-emerald-200/80 p-5 rounded-2xl">
+          <div className="flex items-center justify-between text-emerald-800 mb-2">
+            <span className="text-xs font-bold uppercase tracking-wider">100% Conformes</span>
+            <CheckCircle2 size={18} className="text-emerald-600" />
+          </div>
+          <div className="flex items-baseline gap-2">
+            <span className="text-2xl font-bold text-emerald-900">{pacMetrics.compliantPacsCount}</span>
+            <span className="text-xs font-medium text-emerald-700">
+              de {pacMetrics.totalActivePacsCount} PACs
+            </span>
+          </div>
+          <p className="text-[11px] text-emerald-700/80 mt-1 font-medium">Sem NC e sem atraso no período</p>
+        </div>
+
+        <div className="bg-[#f5f5f0]/80 border border-[#e5e5e0] p-5 rounded-2xl">
+          <div className="flex items-center justify-between text-[#5A5A40] mb-2">
+            <span className="text-xs font-bold uppercase tracking-wider">Taxa de Conformidade</span>
+            <BarChart3 size={18} className="text-[#5A5A40]" />
+          </div>
+          <div className="text-2xl font-bold text-gray-900">
+            {pacMetrics.compliancePercentage}%
+          </div>
+          <p className="text-[11px] text-[#5A5A40]/70 mt-1 font-medium">Proporção de PACs 100% regulares</p>
+        </div>
+
+        <div className="bg-blue-50/70 border border-blue-200/80 p-5 rounded-2xl">
+          <div className="flex items-center justify-between text-blue-800 mb-2">
+            <span className="text-xs font-bold uppercase tracking-wider">Ensaios Conformes</span>
+            <TrendingUp size={18} className="text-blue-600" />
+          </div>
+          <div className="text-2xl font-bold text-blue-950">
+            {pacMetrics.totalEnsaiosCompliant.toLocaleString('pt-BR')}
+          </div>
+          <p className="text-[11px] text-blue-700/80 mt-1 font-medium">Ensaios em PACs sem falhas</p>
+        </div>
+
+        <div className="bg-amber-50/70 border border-amber-200/80 p-5 rounded-2xl">
+          <div className="flex items-center justify-between text-amber-800 mb-2">
+            <span className="text-xs font-bold uppercase tracking-wider">Com Ocorrências</span>
+            <AlertTriangle size={18} className="text-amber-600" />
+          </div>
+          <div className="text-2xl font-bold text-amber-950">
+            {pacMetrics.nonCompliantPacsCount}
+          </div>
+          <p className="text-[11px] text-amber-700/80 mt-1 font-medium">Com NC ou atraso no período</p>
+        </div>
+      </div>
+
+      {/* Tabs and Search Bar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-2">
+        <div className="flex flex-wrap gap-1 bg-[#f5f5f0] p-1 rounded-xl">
+          <button
+            onClick={() => setComplianceTab('compliant')}
+            className={cn(
+              "px-3.5 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer",
+              complianceTab === 'compliant' ? "bg-white text-emerald-800 shadow-sm" : "text-[#5A5A40]/70 hover:text-[#5A5A40]"
+            )}
+          >
+            <CheckCircle2 size={14} className={complianceTab === 'compliant' ? "text-emerald-600" : ""} />
+            PACs 100% Conformes ({pacMetrics.compliantPacsCount})
+          </button>
+
+          <button
+            onClick={() => setComplianceTab('nonCompliant')}
+            className={cn(
+              "px-3.5 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer",
+              complianceTab === 'nonCompliant' ? "bg-white text-amber-800 shadow-sm" : "text-[#5A5A40]/70 hover:text-[#5A5A40]"
+            )}
+          >
+            <AlertTriangle size={14} className={complianceTab === 'nonCompliant' ? "text-amber-600" : ""} />
+            Com Ocorrências ({pacMetrics.nonCompliantPacsCount})
+          </button>
+
+          <button
+            onClick={() => setComplianceTab('all')}
+            className={cn(
+              "px-3.5 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer",
+              complianceTab === 'all' ? "bg-white text-[#5A5A40] shadow-sm" : "text-[#5A5A40]/70 hover:text-[#5A5A40]"
+            )}
+          >
+            Todos os PACs ({pacMetrics.totalActivePacsCount})
+          </button>
+        </div>
+
+        <div className="relative w-full sm:w-64">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={15} />
+          <input
+            type="text"
+            placeholder="Buscar por nome do PAC..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full pl-9 pr-3 py-2 bg-[#f5f5f0] border-none rounded-xl text-xs focus:ring-2 focus:ring-[#5A5A40]/20 focus:outline-none font-medium text-gray-700"
+          />
+        </div>
+      </div>
+
+      {/* Table */}
+      <div className="overflow-x-auto rounded-2xl border border-[#e5e5e0]">
+        <table className="w-full text-left">
+          <thead>
+            <tr className="bg-[#f5f5f0] text-[10px] uppercase font-bold text-[#5A5A40] opacity-80 border-b border-[#e5e5e0]">
+              <th className="py-3 px-4">PAC</th>
+              <th className="py-3 px-4 text-center">Lotes no Período</th>
+              <th className="py-3 px-4 text-center">Ensaios Entregues</th>
+              <th className="py-3 px-4 text-center">Não Conformidades</th>
+              <th className="py-3 px-4 text-center">Atrasos de Entrega</th>
+              <th className="py-3 px-4 text-center">Status de Conformidade</th>
+              <th className="py-3 px-4 text-right">Ação</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-[#f5f5f0] bg-white">
+            {displayedPacs.map((row) => (
+              <tr key={row.pac} className="group hover:bg-[#f5f5f0]/40 transition-colors">
+                <td className="py-3.5 px-4 font-bold text-sm text-gray-800">
+                  {row.pac}
+                </td>
+                <td className="py-3.5 px-4 text-center font-medium text-xs text-gray-600">
+                  {row.totalBatches} {row.totalBatches === 1 ? 'lote' : 'lotes'}
+                </td>
+                <td className="py-3.5 px-4 text-center font-bold text-xs text-gray-800">
+                  {row.totalEnsaios.toLocaleString('pt-BR')}
+                </td>
+                <td className="py-3.5 px-4 text-center">
+                  {row.ncCount === 0 ? (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-emerald-50 text-emerald-700 rounded-full text-xs font-bold">
+                      <Check size={12} /> 0 NCs
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-red-50 text-red-700 rounded-full text-xs font-bold">
+                      <AlertCircle size={12} /> {row.ncCount} NC{row.ncCount > 1 ? 's' : ''}
+                    </span>
+                  )}
+                </td>
+                <td className="py-3.5 px-4 text-center">
+                  {row.delayCount === 0 ? (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-emerald-50 text-emerald-700 rounded-full text-xs font-bold">
+                      <Check size={12} /> 0 Atrasos
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-amber-50 text-amber-800 rounded-full text-xs font-bold">
+                      <Clock size={12} /> {row.delayCount} Atraso{row.delayCount > 1 ? 's' : ''}
+                    </span>
+                  )}
+                </td>
+                <td className="py-3.5 px-4 text-center">
+                  {row.isFullyCompliant ? (
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-100 text-emerald-800 rounded-lg text-xs font-bold border border-emerald-300">
+                      <CheckCircle2 size={13} className="text-emerald-600" /> 100% Conforme
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-100 text-amber-900 rounded-lg text-xs font-bold border border-amber-300">
+                      <AlertTriangle size={13} className="text-amber-700" /> Com Ocorrência
+                    </span>
+                  )}
+                </td>
+                <td className="py-3.5 px-4 text-right">
+                  <button
+                    onClick={() => setSelectedPacForModal(row)}
+                    className="px-3 py-1.5 bg-[#f5f5f0] hover:bg-gray-200 text-[#5A5A40] rounded-lg text-xs font-bold transition-all cursor-pointer"
+                  >
+                    Ver Lotes
+                  </button>
+                </td>
+              </tr>
+            ))}
+
+            {displayedPacs.length === 0 && (
+              <tr>
+                <td colSpan={7} className="py-12 text-center text-sm text-[#5A5A40]/70 italic">
+                  {complianceTab === 'compliant' && (
+                    <div className="space-y-1">
+                      <p className="font-bold text-gray-700 not-italic">Nenhum PAC 100% conforme encontrado no período selecionado.</p>
+                      <p className="text-xs">Todos os PACs com movimentação no período registraram ao menos uma não conformidade ou atraso de entrega.</p>
+                    </div>
+                  )}
+                  {complianceTab === 'nonCompliant' && (
+                    <div className="space-y-1">
+                      <p className="font-bold text-emerald-800 not-italic">Parabéns! Nenhum PAC apresentou ocorrências de atraso ou não conformidade no período.</p>
+                    </div>
+                  )}
+                  {complianceTab === 'all' && (
+                    <p>Nenhum PAC com lotes movimentados no período selecionado.</p>
+                  )}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Modal for viewing batch details for a PAC */}
+      {selectedPacForModal && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-2xl w-full p-6 space-y-4 shadow-xl border border-[#e5e5e0] max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b pb-4">
+              <div>
+                <span className="text-[10px] font-bold uppercase text-[#5A5A40] opacity-60">Lotes do PAC no Período</span>
+                <h3 className="text-lg font-bold text-gray-900">{selectedPacForModal.pac}</h3>
+              </div>
+              <button
+                onClick={() => setSelectedPacForModal(null)}
+                className="p-2 hover:bg-gray-100 rounded-full text-gray-500 cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              {selectedPacForModal.pacBatches.map((b: any) => {
+                const batchNCs = (b.nonConformities && Array.isArray(b.nonConformities) && b.nonConformities.length > 0)
+                  ? b.nonConformities
+                  : (nonConformityRecords || []).filter((nc: any) => nc.recebimento_lote_id === b.id);
+
+                return (
+                  <div key={b.id} className="p-4 bg-[#f5f5f0]/60 rounded-2xl border border-[#e5e5e0] space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-gray-800">Lote ID: {b.id}</span>
+                      <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-md">
+                        {b.numEnsaios} ensaios
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 text-xs text-gray-600">
+                      <div>
+                        <span className="font-semibold block text-[10px] uppercase opacity-60">Período Inicial:</span>
+                        {b.periodoInicial ? format(b.periodoInicial.toDate(), 'dd/MM/yyyy') : '-'}
+                      </div>
+                      <div>
+                        <span className="font-semibold block text-[10px] uppercase opacity-60">Recebido em:</span>
+                        {b.recebidoEm ? format(b.recebidoEm.toDate(), 'dd/MM/yyyy') : '-'}
+                      </div>
+                      <div>
+                        <span className="font-semibold block text-[10px] uppercase opacity-60">Status do Lote:</span>
+                        <span className="font-bold text-gray-800">{b.status || 'ABERTO'}</span>
+                      </div>
+                      <div>
+                        <span className="font-semibold block text-[10px] uppercase opacity-60">Conferido Por:</span>
+                        {b.conferidoPor || 'Pendente'}
+                      </div>
+                    </div>
+
+                    {/* Non conformities badge/list */}
+                    {batchNCs.length > 0 ? (
+                      <div className="bg-red-50 border border-red-200 rounded-xl p-2.5 space-y-1">
+                        <span className="text-[10px] uppercase font-bold text-red-800 block">
+                          Não Conformidades ({batchNCs.length}):
+                        </span>
+                        <ul className="text-xs text-red-900 space-y-1 list-disc list-inside">
+                          {batchNCs.map((ncItem: any, idx: number) => (
+                            <li key={ncItem.id || idx}>
+                              {ncItem.nao_conformidade_name || ncItem.nao_conformidade_id || 'Não Conformidade'}
+                              {ncItem.placas && Array.isArray(ncItem.placas) && ncItem.placas.length > 0 && (
+                                <span className="font-mono text-[11px] text-red-700 ml-1">
+                                  [Placa(s): {ncItem.placas.join(', ')}]
+                                </span>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : (
+                      <div className="text-[11px] text-emerald-700 bg-emerald-50/80 px-2.5 py-1 rounded-lg font-medium inline-block">
+                        ✓ Nenhuma não conformidade neste lote
+                      </div>
+                    )}
+
+                    {b.ensaioForaDoPrazo && (
+                      <div className="text-xs text-amber-800 bg-amber-100 p-2 rounded-lg font-bold flex items-center gap-1.5">
+                        <AlertTriangle size={14} className="text-amber-600" /> Lote marcado como entrega fora do prazo.
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+
+              {selectedPacForModal.pacBatches.length === 0 && (
+                <p className="text-center py-6 text-xs text-gray-500 italic">Nenhum lote registrado para este PAC no período.</p>
+              )}
+            </div>
+
+            <div className="pt-2 text-right">
+              <button
+                onClick={() => setSelectedPacForModal(null)}
+                className="px-5 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-bold rounded-xl cursor-pointer"
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
