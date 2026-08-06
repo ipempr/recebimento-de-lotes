@@ -394,11 +394,22 @@ export default function App() {
   });
 
   // Dashboard Period States
-  const defaultDashStart = useMemo(() => format(new Date(new Date().getFullYear(), new Date().getMonth(), 1), 'yyyy-MM-dd'), []);
-  const defaultDashEnd = useMemo(() => format(new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0), 'yyyy-MM-dd'), []);
+  const currentYearNum = new Date().getFullYear();
+  const defaultCurrentYearStart = useMemo(() => `${currentYearNum}-01-01`, [currentYearNum]);
+  const defaultCurrentYearEnd = useMemo(() => `${currentYearNum}-12-31`, [currentYearNum]);
 
-  const [dashStartDate, setDashStartDate] = useState<string>('');
-  const [dashEndDate, setDashEndDate] = useState<string>('');
+  const defaultDashStart = useMemo(() => format(new Date(currentYearNum, new Date().getMonth(), 1), 'yyyy-MM-dd'), [currentYearNum]);
+  const defaultDashEnd = useMemo(() => format(new Date(currentYearNum, new Date().getMonth() + 1, 0), 'yyyy-MM-dd'), [currentYearNum]);
+
+  // Default to current year filter (Ano Vigente) to optimize initial load and prevent lag
+  const [dashStartDate, setDashStartDate] = useState<string>(defaultCurrentYearStart);
+  const [dashEndDate, setDashEndDate] = useState<string>(defaultCurrentYearEnd);
+  const [visibleBatchLimit, setVisibleBatchLimit] = useState<number>(30);
+
+  // Reset pagination limit whenever filters change
+  useEffect(() => {
+    setVisibleBatchLimit(30);
+  }, [searchTerm, statusFilter, dashStartDate, dashEndDate]);
 
   // Error Handler
   const handleFirestoreError = (error: unknown, operationType: OperationType, path: string | null) => {
@@ -965,17 +976,103 @@ export default function App() {
     runFix();
   }, [user, batches, isLocalMode]);
 
+  // Autocorrect batches and PAC configs where pac is "CALIXTO", replacing with "JOSÉ CALIXTO"
+  useEffect(() => {
+    if (!user) return;
+
+    // 1. Check batches
+    if (batches.length > 0) {
+      const batchesNeedCalixtoFix = batches.filter(b => {
+        const p = b.pac ? b.pac.trim().toUpperCase() : '';
+        return p === 'CALIXTO' || p === 'PAC CALIXTO' || (p.includes('CALIXTO') && !p.includes('JOSÉ') && !p.includes('JOSE'));
+      });
+
+      if (batchesNeedCalixtoFix.length > 0) {
+        const runCalixtoBatchFix = async () => {
+          if (isLocalMode) {
+            const updated = batches.map(b => {
+              const p = b.pac ? b.pac.trim().toUpperCase() : '';
+              if (p === 'CALIXTO' || p === 'PAC CALIXTO' || (p.includes('CALIXTO') && !p.includes('JOSÉ') && !p.includes('JOSE'))) {
+                return { ...b, pac: 'JOSÉ CALIXTO' };
+              }
+              return b;
+            });
+            setBatches(updated);
+            localStorage.setItem('lotes_batches', JSON.stringify(updated));
+          } else {
+            try {
+              const batchUpdate = writeBatch(db);
+              batchesNeedCalixtoFix.forEach(b => {
+                const docRef = doc(db, 'batches', b.id);
+                batchUpdate.update(docRef, { pac: 'JOSÉ CALIXTO' });
+              });
+              await batchUpdate.commit();
+            } catch (err) {
+              console.error("Erro ao corrigir PAC CALIXTO em batches no Firestore:", err);
+            }
+          }
+        };
+        runCalixtoBatchFix();
+      }
+    }
+
+    // 2. Check PACs configuration list
+    if (pacs.length > 0) {
+      const pacsNeedFix = pacs.filter(p => {
+        const nameUpper = p.name ? p.name.trim().toUpperCase() : '';
+        return nameUpper === 'CALIXTO' || nameUpper === 'PAC CALIXTO' || (nameUpper.includes('CALIXTO') && !nameUpper.includes('JOSÉ') && !nameUpper.includes('JOSE'));
+      });
+
+      if (pacsNeedFix.length > 0) {
+        const runCalixtoPacConfigFix = async () => {
+          if (isLocalMode) {
+            const updatedPacs = pacs.map(p => {
+              const nameUpper = p.name ? p.name.trim().toUpperCase() : '';
+              if (nameUpper === 'CALIXTO' || nameUpper === 'PAC CALIXTO' || (nameUpper.includes('CALIXTO') && !nameUpper.includes('JOSÉ') && !nameUpper.includes('JOSE'))) {
+                return { ...p, name: 'JOSÉ CALIXTO' };
+              }
+              return p;
+            });
+            setPacs(updatedPacs);
+            localStorage.setItem('lotes_pacs', JSON.stringify(updatedPacs));
+          } else {
+            try {
+              const batchUpdate = writeBatch(db);
+              pacsNeedFix.forEach(p => {
+                const docRef = doc(db, 'pacs', p.id);
+                batchUpdate.update(docRef, { name: 'JOSÉ CALIXTO' });
+              });
+              await batchUpdate.commit();
+            } catch (err) {
+              console.error("Erro ao corrigir PAC CALIXTO em pacs no Firestore:", err);
+            }
+          }
+        };
+        runCalixtoPacConfigFix();
+      }
+    }
+  }, [user, batches, pacs, isLocalMode]);
+
   // Filtered Batches
   const filteredBatches = useMemo(() => {
+    const searchLower = searchTerm.toLowerCase().trim();
+    const startDateObj = dashStartDate ? startOfDay(parseLocalDate(dashStartDate)) : null;
+    const endDateObj = dashEndDate ? startOfDay(parseLocalDate(dashEndDate)) : null;
+    const now = new Date();
+
     return batches.filter(b => {
-      const matchesSearch = b.pac.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        b.status.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        b.recebidoPor.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesSearch = !searchLower ||
+        (b.pac && b.pac.toLowerCase().includes(searchLower)) ||
+        (b.status && b.status.toLowerCase().includes(searchLower)) ||
+        (b.recebidoPor && b.recebidoPor.toLowerCase().includes(searchLower));
       
+      if (!matchesSearch) return false;
+
       const isFinished = !!b.conferidoPor && b.conferidoPor.trim() !== '';
-      const deadline = addDays(b.periodoInicial.toDate(), 30);
-      const daysRemaining = differenceInDays(deadline, new Date());
-      const isOverdue = !isFinished && isAfter(new Date(), deadline);
+      const periodoInicialDate = b.periodoInicial ? b.periodoInicial.toDate() : null;
+      const deadline = periodoInicialDate ? addDays(periodoInicialDate, 30) : null;
+      const daysRemaining = deadline ? differenceInDays(deadline, now) : 0;
+      const isOverdue = !isFinished && deadline ? isAfter(now, deadline) : false;
       const isWarning = !isFinished && !isOverdue && daysRemaining <= 10;
 
       // Status Filter Logic
@@ -987,21 +1084,15 @@ export default function App() {
 
       // Dashboard Period Filter
       const dateObj = isFinished 
-        ? b.periodoInicial.toDate() 
-        : (b.recebidoEm ? b.recebidoEm.toDate() : b.periodoInicial?.toDate());
+        ? periodoInicialDate 
+        : (b.recebidoEm ? b.recebidoEm.toDate() : periodoInicialDate);
 
       if (dateObj) {
-        if (dashStartDate) {
-          const start = startOfDay(parseLocalDate(dashStartDate));
-          if (dateObj < start) return false;
-        }
-        if (dashEndDate) {
-          const end = startOfDay(parseLocalDate(dashEndDate));
-          if (startOfDay(dateObj) > end) return false;
-        }
+        if (startDateObj && dateObj < startDateObj) return false;
+        if (endDateObj && startOfDay(dateObj) > endDateObj) return false;
       }
 
-      return matchesSearch;
+      return true;
     });
   }, [batches, searchTerm, statusFilter, dashStartDate, dashEndDate]);
 
@@ -1013,28 +1104,34 @@ export default function App() {
     let totalEnsaiosOpen = 0;
     let totalEnsaiosReceived = 0;
 
+    const startDateObj = dashStartDate ? startOfDay(parseLocalDate(dashStartDate)) : null;
+    const endDateObj = dashEndDate ? startOfDay(parseLocalDate(dashEndDate)) : null;
+
     batches.forEach(b => {
       const hasInformado = b.conferidoPor && b.conferidoPor.trim() !== '';
+      const periodoInicialDate = b.periodoInicial ? b.periodoInicial.toDate() : null;
+      const recebidoEmDate = b.recebidoEm ? b.recebidoEm.toDate() : null;
 
       if (hasInformado) {
         // Check if finished batch is within dashboard period filter (using periodoInicial)
         let match = true;
-        if (dashStartDate) {
-          const start = startOfDay(parseLocalDate(dashStartDate));
-          if (b.periodoInicial.toDate() < start) match = false;
-        }
-        if (dashEndDate) {
-          const end = startOfDay(parseLocalDate(dashEndDate));
-          if (startOfDay(b.periodoInicial.toDate()) > end) match = false;
+        if (periodoInicialDate) {
+          if (startDateObj && periodoInicialDate < startDateObj) match = false;
+          if (endDateObj && startOfDay(periodoInicialDate) > endDateObj) match = false;
         }
 
         if (match) {
-          totalEnsaiosFinished += b.numEnsaios;
+          totalEnsaiosFinished += (b.numEnsaios || 0);
           
           // On time vs Late
-          const deadline = addDays(b.periodoInicial.toDate(), 30);
-          if (isAfter(b.conferidoEm!.toDate(), deadline)) {
-            lateCount++;
+          if (periodoInicialDate) {
+            const deadline = addDays(periodoInicialDate, 30);
+            const conferidoEmDate = b.conferidoEm ? b.conferidoEm.toDate() : null;
+            if (conferidoEmDate && isAfter(conferidoEmDate, deadline)) {
+              lateCount++;
+            } else {
+              onTimeCount++;
+            }
           } else {
             onTimeCount++;
           }
@@ -1042,38 +1139,28 @@ export default function App() {
       } else {
         // Check if open batch is within dashboard period filter (using recebidoEm)
         let matchOpen = true;
-        const openDate = b.recebidoEm ? b.recebidoEm.toDate() : b.periodoInicial?.toDate();
+        const openDate = recebidoEmDate || periodoInicialDate;
         if (openDate) {
-          if (dashStartDate) {
-            const start = startOfDay(parseLocalDate(dashStartDate));
-            if (openDate < start) matchOpen = false;
-          }
-          if (dashEndDate) {
-            const end = startOfDay(parseLocalDate(dashEndDate));
-            if (startOfDay(openDate) > end) matchOpen = false;
-          }
+          if (startDateObj && openDate < startDateObj) matchOpen = false;
+          if (endDateObj && startOfDay(openDate) > endDateObj) matchOpen = false;
         } else {
           matchOpen = false;
         }
 
         if (matchOpen) {
-          totalEnsaiosOpen += b.numEnsaios;
+          totalEnsaiosOpen += (b.numEnsaios || 0);
         }
       }
 
       // Check if batch is within dashboard period filter using recebidoEm and has recebidoPor filled
       let matchReceived = true;
-      if (dashStartDate) {
-        const start = startOfDay(parseLocalDate(dashStartDate));
-        if (b.recebidoEm.toDate() < start) matchReceived = false;
-      }
-      if (dashEndDate) {
-        const end = startOfDay(parseLocalDate(dashEndDate));
-        if (startOfDay(b.recebidoEm.toDate()) > end) matchReceived = false;
+      if (recebidoEmDate) {
+        if (startDateObj && recebidoEmDate < startDateObj) matchReceived = false;
+        if (endDateObj && startOfDay(recebidoEmDate) > endDateObj) matchReceived = false;
       }
 
       if (matchReceived && b.recebidoPor && b.recebidoPor.trim() !== '') {
-        totalEnsaiosReceived += b.numEnsaios;
+        totalEnsaiosReceived += (b.numEnsaios || 0);
       }
     });
 
@@ -1418,8 +1505,13 @@ export default function App() {
             <div className="bg-white p-6 rounded-[24px] border border-[#e5e5e0] mb-8">
               <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                 <div className="space-y-1">
-                  <h3 className="text-sm font-bold uppercase tracking-wider text-[#5A5A40]">Filtro de Período de Produção</h3>
-                  <p className="text-xs text-[#5A5A40]/60">Mostrando dados correspondentes aos lotes cujo período inicial está no intervalo selecionado.</p>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-bold uppercase tracking-wider text-[#5A5A40]">Filtro de Período de Produção</h3>
+                    <span className="text-[10px] font-semibold px-2 py-0.5 bg-[#f0f0e5] text-[#5A5A40] rounded-full">
+                      Exibindo {filteredBatches.length} de {batches.length} lotes
+                    </span>
+                  </div>
+                  <p className="text-xs text-[#5A5A40]/60">Filtrando por data inicial do lote. O padrão é o <strong>Ano Vigente ({currentYearNum})</strong> para máxima velocidade.</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-4">
                   <div className="flex items-center gap-2">
@@ -1440,26 +1532,70 @@ export default function App() {
                       onChange={(e) => setDashEndDate(e.target.value)}
                     />
                   </div>
-                  <div className="flex gap-2 shrink-0">
+                  <div className="flex flex-wrap gap-2 shrink-0">
+                    <button
+                      onClick={() => {
+                        setDashStartDate(defaultCurrentYearStart);
+                        setDashEndDate(defaultCurrentYearEnd);
+                      }}
+                      className={`px-3 py-2 font-bold text-xs rounded-xl transition-all ${
+                        dashStartDate === defaultCurrentYearStart && dashEndDate === defaultCurrentYearEnd
+                          ? 'bg-[#5A5A40] text-white shadow-sm'
+                          : 'bg-[#f0f0e5] text-[#5A5A40] hover:bg-[#e0e0d5]'
+                      }`}
+                      title="Ano Vigente"
+                    >
+                      Ano Vigente ({currentYearNum})
+                    </button>
                     <button
                       onClick={() => {
                         setDashStartDate(defaultDashStart);
                         setDashEndDate(defaultDashEnd);
                       }}
-                      className="px-3 py-2 bg-[#f0f0e5] font-bold text-[#5A5A40] text-xs rounded-xl hover:bg-[#e0e0d5] transition-all"
-                      title="Reiniciar para o mês atual"
+                      className={`px-3 py-2 font-bold text-xs rounded-xl transition-all ${
+                        dashStartDate === defaultDashStart && dashEndDate === defaultDashEnd
+                          ? 'bg-[#5A5A40] text-white shadow-sm'
+                          : 'bg-[#f0f0e5] text-[#5A5A40] hover:bg-[#e0e0d5]'
+                      }`}
+                      title="Mês Atual"
                     >
                       Este Mês
+                    </button>
+                    <button
+                      onClick={() => {
+                        const thirtyDaysAgo = format(addDays(new Date(), -30), 'yyyy-MM-dd');
+                        const today = format(new Date(), 'yyyy-MM-dd');
+                        setDashStartDate(thirtyDaysAgo);
+                        setDashEndDate(today);
+                      }}
+                      className="px-3 py-2 bg-[#f0f0e5] font-bold text-[#5A5A40] text-xs rounded-xl hover:bg-[#e0e0d5] transition-all"
+                      title="Últimos 30 Dias"
+                    >
+                      30 Dias
+                    </button>
+                    <button
+                      onClick={() => {
+                        setDashStartDate(`${currentYearNum - 1}-01-01`);
+                        setDashEndDate(`${currentYearNum - 1}-12-31`);
+                      }}
+                      className="px-3 py-2 bg-[#f0f0e5] font-bold text-[#5A5A40] text-xs rounded-xl hover:bg-[#e0e0d5] transition-all"
+                      title="Ano Passado"
+                    >
+                      {currentYearNum - 1}
                     </button>
                     <button
                       onClick={() => {
                         setDashStartDate('');
                         setDashEndDate('');
                       }}
-                      className="px-3 py-2 bg-gray-100 font-bold text-gray-600 text-xs rounded-xl hover:bg-gray-200 transition-all"
+                      className={`px-3 py-2 font-bold text-xs rounded-xl transition-all ${
+                        !dashStartDate && !dashEndDate
+                          ? 'bg-amber-600 text-white shadow-sm'
+                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      }`}
                       title="Mostrar todos os registros"
                     >
-                      Limpar
+                      Todo Histórico
                     </button>
                   </div>
                 </div>
@@ -1551,7 +1687,7 @@ export default function App() {
 
             {/* Batches Grid */}
             <div className="grid grid-cols-1 gap-4">
-              {filteredBatches.map((batch) => (
+              {filteredBatches.slice(0, visibleBatchLimit).map((batch) => (
                 <BatchCard 
                   key={batch.id} 
                   batch={batch} 
@@ -1562,6 +1698,25 @@ export default function App() {
                   onDelete={() => setBatchToDelete(batch.id)}
                 />
               ))}
+              {filteredBatches.length > visibleBatchLimit && (
+                <div className="flex flex-col sm:flex-row items-center justify-center gap-3 py-6 bg-white/60 rounded-[24px] border border-[#e5e5e0]">
+                  <button
+                    onClick={() => setVisibleBatchLimit(prev => prev + 30)}
+                    className="px-6 py-3 bg-[#5A5A40] text-white font-medium text-xs rounded-xl hover:bg-[#4a4a30] transition-all shadow-md shadow-[#5A5A40]/10 flex items-center gap-2"
+                  >
+                    <span>Carregar Mais Lotes</span>
+                    <span className="bg-white/20 px-2 py-0.5 rounded-full text-[10px]">
+                      +{Math.min(30, filteredBatches.length - visibleBatchLimit)} de {filteredBatches.length - visibleBatchLimit} restantes
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => setVisibleBatchLimit(filteredBatches.length)}
+                    className="px-4 py-3 bg-gray-100 text-gray-700 font-medium text-xs rounded-xl hover:bg-gray-200 transition-all"
+                  >
+                    Exibir Todos ({filteredBatches.length} lotes)
+                  </button>
+                </div>
+              )}
               {filteredBatches.length === 0 && (
                 <div className="text-center py-20 bg-white rounded-[32px] border border-dashed border-[#e5e5e0]">
                   <Clock className="mx-auto mb-4 text-[#5A5A40]/30" size={48} />
@@ -2064,8 +2219,14 @@ function BatchModal({ isOpen, onClose, batch, pacs, collaborators, statuses, non
         return isLocalMode ? LocalTimestamp.now() : Timestamp.now();
       };
 
+      let normPac = formData.pac ? formData.pac.trim() : '';
+      if (normPac.toUpperCase() === 'CALIXTO' || normPac.toUpperCase() === 'PAC CALIXTO' || (normPac.toUpperCase().includes('CALIXTO') && !normPac.toUpperCase().includes('JOSÉ') && !normPac.toUpperCase().includes('JOSE'))) {
+        normPac = 'JOSÉ CALIXTO';
+      }
+
       const data = {
         ...formData,
+        pac: normPac,
         status: finalStatus,
         numEnsaios: Number(formData.numEnsaios),
         periodoInicial: getTimestampFromDate(parseLocalDate(formData.periodoInicial)),
@@ -2826,7 +2987,10 @@ function ConfigPanel({
           return isNaN(date.getTime()) ? null : Timestamp.fromDate(date);
         };
 
-        const pac = cleanString(getVal(['PAC', 'Pacote', 'Lote', 'Identificação', 'Identificacao']));
+        let pac = cleanString(getVal(['PAC', 'Pacote', 'Lote', 'Identificação', 'Identificacao']));
+        if (pac.toUpperCase().trim() === 'CALIXTO' || pac.toUpperCase().trim() === 'PAC CALIXTO' || (pac.toUpperCase().includes('CALIXTO') && !pac.toUpperCase().includes('JOSÉ') && !pac.toUpperCase().includes('JOSE'))) {
+          pac = 'JOSÉ CALIXTO';
+        }
         const periodoInicialVal = getVal(['PERÍODO INICIAL', 'Periodo Inicial', 'Data Inicial', 'Inicio', 'Início', 'Data de Inicio', 'Data de Início']);
         const periodoFinalVal = getVal(['PERÍODO FINAL', 'Periodo Final', 'Data Final', 'Fim', 'Data de Fim', 'Término', 'Termino']);
         const numEnsaios = Number(getVal(['Nº DE ENSAIOS', 'Ensaios', 'Nº Ensaios', 'Quantidade', 'Nº de Ensaios', 'Numero de Ensaios', 'Num Ensaios']) || 0);
@@ -5129,6 +5293,16 @@ function PacComplianceSection({
     const startDate = statsStartDate ? startOfDay(parseLocalDate(statsStartDate)) : null;
     const endDate = statsEndDate ? startOfDay(parseLocalDate(statsEndDate)) : null;
 
+    // Build NC Map by batch ID once to avoid repeated array filtering
+    const ncMapByBatch = new Map<string, any[]>();
+    (nonConformityRecords || []).forEach((nc: any) => {
+      if (nc.recebimento_lote_id) {
+        const list = ncMapByBatch.get(nc.recebimento_lote_id) || [];
+        list.push(nc);
+        ncMapByBatch.set(nc.recebimento_lote_id, list);
+      }
+    });
+
     // Filter batches belonging to the selected statistics period
     const periodBatches = batches.filter(b => {
       const dateObj = b.recebidoEm ? b.recebidoEm.toDate() : (b.periodoInicial ? b.periodoInicial.toDate() : null);
@@ -5156,9 +5330,9 @@ function PacComplianceSection({
           totalEnsaiosDelivered += numEns;
         }
 
-        // Check NCs strictly linked to this batch ID
+        // Check NCs strictly linked to this batch ID using O(1) Map lookup
         const ncListLocal = b.nonConformities || [];
-        const ncListFirestore = (nonConformityRecords || []).filter((nc: any) => nc.recebimento_lote_id === b.id);
+        const ncListFirestore = ncMapByBatch.get(b.id) || [];
         const batchNCs = ncListLocal.length > 0 ? ncListLocal : ncListFirestore;
 
         if (batchNCs.length > 0) {
