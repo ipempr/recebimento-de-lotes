@@ -773,7 +773,7 @@ export default function App() {
 
   const handleUpdateUserStatus = async (
     targetUid: string,
-    newStatus: 'APPROVED' | 'REJECTED',
+    newStatus: 'APPROVED' | 'PENDING' | 'REJECTED',
     newRole: 'ADMIN' | 'OPERADOR' | 'VISUALIZADOR'
   ) => {
     if (isLocalMode) {
