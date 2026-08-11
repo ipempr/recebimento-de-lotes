@@ -18,11 +18,19 @@ import {
   Sparkles,
   Info,
   ChevronRight,
-  ShieldAlert
+  ShieldAlert,
+  Users,
+  ShieldCheck,
+  UserCheck,
+  UserX,
+  Lock,
+  Eye,
+  UserPlus,
+  Key
 } from 'lucide-react';
 
 export function SystemTutorial() {
-  const [activeSection, setActiveSection] = useState<'dashboard' | 'stats' | 'notifications' | 'config' | 'storage'>('dashboard');
+  const [activeSection, setActiveSection] = useState<'dashboard' | 'stats' | 'notifications' | 'users' | 'config' | 'storage'>('dashboard');
 
   return (
     <div className="bg-white rounded-[32px] border border-[#e5e5e0] overflow-hidden shadow-xs">
@@ -34,7 +42,7 @@ export function SystemTutorial() {
         </div>
         <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight">Manual & Tutorial de Operações do Sistema</h1>
         <p className="text-[#f5f5f0]/85 text-xs md:text-sm mt-1 max-w-2xl font-medium">
-          Aprenda como operar cada funcionalidade da plataforma de monitoramento de lotes e emissão de notificações regulatórias do IPEM-PR.
+          Aprenda como operar cada funcionalidade da plataforma de monitoramento de lotes, gestão de usuários e emissão de notificações regulatórias do IPEM-PR.
         </p>
       </div>
 
@@ -45,7 +53,7 @@ export function SystemTutorial() {
           <nav className="space-y-1.5">
             <button
               onClick={() => setActiveSection('dashboard')}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold transition-all text-left ${
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${
                 activeSection === 'dashboard'
                   ? 'bg-[#5A5A40] text-white shadow-xs'
                   : 'text-[#50503A] hover:bg-[#f0f0e5] hover:text-[#5A5A40]'
@@ -58,7 +66,7 @@ export function SystemTutorial() {
 
             <button
               onClick={() => setActiveSection('stats')}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold transition-all text-left ${
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${
                 activeSection === 'stats'
                   ? 'bg-[#5A5A40] text-white shadow-xs'
                   : 'text-[#50503A] hover:bg-[#f0f0e5] hover:text-[#5A5A40]'
@@ -71,7 +79,7 @@ export function SystemTutorial() {
 
             <button
               onClick={() => setActiveSection('notifications')}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold transition-all text-left ${
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${
                 activeSection === 'notifications'
                   ? 'bg-[#5A5A40] text-white shadow-xs'
                   : 'text-[#50503A] hover:bg-[#f0f0e5] hover:text-[#5A5A40]'
@@ -83,8 +91,21 @@ export function SystemTutorial() {
             </button>
 
             <button
+              onClick={() => setActiveSection('users')}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${
+                activeSection === 'users'
+                  ? 'bg-[#5A5A40] text-white shadow-xs'
+                  : 'text-[#50503A] hover:bg-[#f0f0e5] hover:text-[#5A5A40]'
+              }`}
+            >
+              <Users size={16} />
+              <span>Gestão de Usuários & Acessos</span>
+              <ChevronRight size={14} className="ml-auto opacity-70" />
+            </button>
+
+            <button
               onClick={() => setActiveSection('config')}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold transition-all text-left ${
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${
                 activeSection === 'config'
                   ? 'bg-[#5A5A40] text-white shadow-xs'
                   : 'text-[#50503A] hover:bg-[#f0f0e5] hover:text-[#5A5A40]'
@@ -97,7 +118,7 @@ export function SystemTutorial() {
 
             <button
               onClick={() => setActiveSection('storage')}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold transition-all text-left ${
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${
                 activeSection === 'storage'
                   ? 'bg-[#5A5A40] text-white shadow-xs'
                   : 'text-[#50503A] hover:bg-[#f0f0e5] hover:text-[#5A5A40]'
@@ -113,10 +134,10 @@ export function SystemTutorial() {
             <div className="bg-[#f0f0e5]/60 rounded-2xl p-4 border border-[#e0e0d5]">
               <div className="flex items-center gap-2 mb-1.5 text-xs font-extrabold text-[#5A5A40]">
                 <HelpCircle size={15} />
-                <span>Atualização de Versão</span>
+                <span>Atualização do Sistema</span>
               </div>
               <p className="text-[10px] text-[#6A6A50] leading-relaxed">
-                Este manual detalha as melhorias implementadas em <strong>Junho de 2026</strong>, como pesquisa textual nos Motivos de Não-Conformidade e tratamento avançado de ensaios entregues fora do prazo.
+                Este manual detalha as melhorias implementadas em <strong>Agosto de 2026</strong>, como o Painel de Gestão e Visualização de Perfis de Usuários, Controle de Acesso por Níveis (ADMIN, OPERADOR, VISUALIZADOR), alteração em tempo real de Status (Aprovado, Pendente, Bloqueado) e Pré-Aprovação de e-mails Google.
               </p>
             </div>
           </div>
@@ -365,6 +386,147 @@ export function SystemTutorial() {
                     <div className="pt-6 text-center space-y-1 max-w-xs mx-auto">
                       <div className="border-t border-gray-300 pt-1 font-bold text-gray-850 uppercase text-[10px]">DIRETORIA DE METROLOGIA E FISCALIZAÇÃO</div>
                       <div className="text-[9px] text-gray-500 italic">IPEM-PR</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* SECTION: USERS */}
+          {activeSection === 'users' && (
+            <div className="space-y-6">
+              <div className="flex items-center gap-2 pb-3 border-b border-gray-100">
+                <Users className="text-[#5A5A40] w-6 h-6" />
+                <h3 className="text-lg font-bold text-gray-900">Gestão de Usuários & Controle de Acessos</h3>
+              </div>
+
+              <p className="text-xs text-gray-600 leading-relaxed">
+                Este módulo é exclusivo para contas de nível <b>Administrador</b>. Ele permite visualizar o perfil completo de todos os usuários cadastrados na plataforma via autenticação Google ou banco de dados, atribuir níveis de permissão específicos e alterar o status de liberação de cada colaborador em tempo real.
+              </p>
+
+              {/* Roles Breakdown */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="p-4 rounded-2xl border border-purple-200 bg-purple-50/60 space-y-1.5">
+                  <div className="flex items-center gap-2 text-purple-900 font-bold text-xs uppercase tracking-wider">
+                    <ShieldCheck size={16} className="text-purple-700" />
+                    <span>Administrador</span>
+                  </div>
+                  <p className="text-xs text-purple-900/80 leading-relaxed">
+                    Possui controle total. Pode gerenciar usuários, pré-aprovar e-mails, alterar permissões, acessar e modificar as Configurações com senha e emitir notificações regulatórias.
+                  </p>
+                </div>
+
+                <div className="p-4 rounded-2xl border border-blue-200 bg-blue-50/60 space-y-1.5">
+                  <div className="flex items-center gap-2 text-blue-900 font-bold text-xs uppercase tracking-wider">
+                    <UserCheck size={16} className="text-blue-700" />
+                    <span>Operador</span>
+                  </div>
+                  <p className="text-xs text-blue-900/80 leading-relaxed">
+                    Pode registrar e editar lotes de ensaios, cadastrar não-conformidades de placas e emitir ofícios/notificações de irregularidade. Não possui acesso à gestão de usuários ou configurações.
+                  </p>
+                </div>
+
+                <div className="p-4 rounded-2xl border border-emerald-200 bg-emerald-50/60 space-y-1.5">
+                  <div className="flex items-center gap-2 text-emerald-900 font-bold text-xs uppercase tracking-wider">
+                    <Lock size={16} className="text-emerald-700" />
+                    <span>Visualizador</span>
+                  </div>
+                  <p className="text-xs text-emerald-900/80 leading-relaxed">
+                    Nível de consulta e leitura. Acessa o Dashboard, relatórios estatísticos e histórico de PACs, sendo impedido de alterar registros ou emitir novos ofícios.
+                  </p>
+                </div>
+              </div>
+
+              {/* Status Breakdown & Actions */}
+              <div className="bg-[#fcfbf9] border border-[#e5e5e0] rounded-2xl p-5 space-y-4">
+                <h4 className="text-xs font-bold text-gray-800 flex items-center gap-2">
+                  <ShieldCheck size={18} className="text-[#5A5A40]" />
+                  <span>Status de Liberação & Recursos de Acesso</span>
+                </h4>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                  <div className="p-3.5 bg-white rounded-xl border border-gray-200 space-y-1">
+                    <span className="font-bold text-gray-800 flex items-center gap-1.5">
+                      <span className="text-emerald-600 font-bold">🟢 Aprovado</span>
+                    </span>
+                    <p className="text-[11px] text-gray-500 leading-relaxed">
+                      O usuário tem seu acesso liberado ao sistema imediatamente de acordo com o seu nível de permissão atribuído (Admin, Operador ou Visualizador).
+                    </p>
+                  </div>
+
+                  <div className="p-3.5 bg-white rounded-xl border border-gray-200 space-y-1">
+                    <span className="font-bold text-gray-800 flex items-center gap-1.5">
+                      <span className="text-amber-600 font-bold">🟡 Pendente</span>
+                    </span>
+                    <p className="text-[11px] text-gray-500 leading-relaxed">
+                      O colaborador realizou o login via Google, mas seu perfil está aguardando aprovação explícita de um Administrador antes de navegar no sistema.
+                    </p>
+                  </div>
+
+                  <div className="p-3.5 bg-white rounded-xl border border-gray-200 space-y-1">
+                    <span className="font-bold text-gray-800 flex items-center gap-1.5">
+                      <span className="text-red-600 font-bold">🔴 Bloqueado</span>
+                    </span>
+                    <p className="text-[11px] text-gray-500 leading-relaxed">
+                      Acesso revogado ou suspenso. Ao tentar navegar no aplicativo, uma tela de bloqueio informará a restrição ao colaborador.
+                    </p>
+                  </div>
+
+                  <div className="p-3.5 bg-white rounded-xl border border-gray-200 space-y-1">
+                    <span className="font-bold text-gray-800 flex items-center gap-1.5">
+                      <UserPlus size={15} className="text-[#5A5A40]" />
+                      <span>Cadastrar / Pré-aprovar Usuários</span>
+                    </span>
+                    <p className="text-[11px] text-gray-500 leading-relaxed">
+                      Clique no botão no topo do painel para cadastrar e-mails institucionais antecedendo o primeiro login do colaborador, liberando o acesso automaticamente.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Instructions on Viewing User Profile */}
+              <div className="space-y-3">
+                <h4 className="text-xs font-bold text-gray-800">Como visualizar e alterar o perfil de um usuário:</h4>
+                <ol className="space-y-2 text-xs text-gray-600 list-decimal pl-4.5">
+                  <li>Navegue até a aba <b>"Acessos"</b> no menu lateral ou superior;</li>
+                  <li>Inicie a busca usando a barra de pesquisa por nome ou e-mail, ou filtre por sub-abas (<b>Todos</b>, <b>Pendentes</b>, <b>Aprovados</b>, <b>Bloqueados</b>);</li>
+                  <li>Para alterações rápidas, utilize os seletores de <b>Status</b> ou <b>Nível de Permissão</b> presentes diretamente na linha do usuário;</li>
+                  <li>Para uma análise detalhada, clique no botão <b>"Ver Perfil"</b> (ícone de olho) ao lado do usuário;</li>
+                  <li>No janela de Perfil, você visualizará a foto do Google, e-mail, ID único (UID) e poderá definir o Status e Cargo de uma só vez clicando em <b>"Salvar Alterações de Perfil"</b>.</li>
+                </ol>
+              </div>
+
+              {/* Mockup visual of User Profile Modal */}
+              <div className="mt-4 border border-gray-200 rounded-3xl overflow-hidden bg-white shadow-sm font-sans">
+                <div className="bg-[#f0f0ea] px-4 py-2 border-b border-gray-200 flex items-center justify-between text-[11px] font-bold text-[#5A5A40]">
+                  <span className="flex items-center gap-1.5"><Eye size={12} /> Representação Visual: Perfil do Usuário</span>
+                  <span className="bg-white/70 px-2 py-0.5 rounded text-[9px] font-bold">PAINEL ADMINISTRATIVO</span>
+                </div>
+                <div className="p-6 bg-[#fafafa]">
+                  <div className="max-w-md mx-auto bg-white rounded-2xl border border-gray-200 p-5 shadow-sm space-y-4">
+                    <div className="flex items-center gap-3 border-b pb-3">
+                      <div className="w-12 h-12 rounded-full bg-[#5A5A40] text-white font-bold flex items-center justify-center text-lg">
+                        J
+                      </div>
+                      <div>
+                        <h5 className="font-bold text-xs text-gray-900">João da Silva</h5>
+                        <p className="text-[10px] font-mono text-[#5A5A40]">joao.silva@ipem.pr.gov.br</p>
+                        <span className="text-[9px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full mt-1 inline-block">
+                          APROVADO
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2 text-[10px]">
+                      <div>
+                        <label className="block text-gray-400 font-bold mb-1">STATUS DA AUTORIZAÇÃO</label>
+                        <div className="p-2 border rounded-xl bg-emerald-50 text-emerald-900 font-bold">🟢 Aprovado (Acesso Liberado)</div>
+                      </div>
+                      <div>
+                        <label className="block text-gray-400 font-bold mb-1">NÍVEL DE PERMISSÃO (CARGO)</label>
+                        <div className="p-2 border rounded-xl bg-blue-50 text-blue-900 font-bold">Operador (Criar, Editar e Registrar Ensaio)</div>
+                      </div>
                     </div>
                   </div>
                 </div>
