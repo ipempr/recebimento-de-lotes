@@ -60,7 +60,10 @@ import {
   Eye,
   EyeOff,
   ShieldCheck,
-  FileCheck
+  FileCheck,
+  RefreshCw,
+  UserCheck,
+  UserX
 } from 'lucide-react';
 import { format, addDays, differenceInDays, isAfter, isBefore, startOfDay, parse } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -85,6 +88,7 @@ import NotificationsPanel from './components/NotificationsPanel';
 import NotificationTemplatesManager from './components/NotificationTemplatesManager';
 import { SystemTutorial } from './components/SystemTutorial';
 import { ConfigPasswordGate } from './components/ConfigPasswordGate';
+import UserManagementPanel, { UserProfile } from './components/UserManagementPanel';
 
 // Utility for tailwind classes
 function cn(...inputs: ClassValue[]) {
@@ -293,11 +297,113 @@ function parseAuthError(err: any): AuthErrorDetails {
   };
 }
 
+function PendingApprovalScreen({ user, onRefresh, onLogout }: { user: any; onRefresh: () => void; onLogout: () => void }) {
+  const [checking, setChecking] = useState(false);
+
+  const handleCheckAgain = async () => {
+    setChecking(true);
+    await onRefresh();
+    setTimeout(() => setChecking(false), 600);
+  };
+
+  return (
+    <div className="min-h-screen bg-[#f5f5f0] flex items-center justify-center p-4">
+      <div className="bg-white w-full max-w-lg rounded-[32px] border border-[#e5e5e0] shadow-2xl p-8 text-center animate-in fade-in zoom-in duration-200">
+        <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center text-amber-600 mx-auto mb-6 shadow-inner">
+          <Clock size={32} className="animate-pulse" />
+        </div>
+        
+        <span className="inline-block px-3 py-1 bg-amber-100 text-amber-800 text-xs font-bold rounded-full uppercase tracking-wider mb-3">
+          Solicitação de Acesso em Análise
+        </span>
+
+        <h2 className="text-2xl font-display font-bold text-gray-900 tracking-tight mb-2">
+          Aguardando Liberação do Administrador
+        </h2>
+
+        <p className="text-sm text-[#5A5A40] leading-relaxed mb-6">
+          Olá, <strong>{user?.displayName || 'Usuário'}</strong>! Sua conta de e-mail <strong>{user?.email}</strong> foi cadastrada com sucesso.
+          O seu acesso precisa ser aprovado por um Administrador do IPEM-PR antes de utilizar o sistema.
+        </p>
+
+        <div className="bg-[#f5f5f0] p-4 rounded-2xl border border-[#e5e5e0] text-left text-xs space-y-2 mb-6">
+          <div className="flex justify-between items-center">
+            <span className="text-gray-500 font-medium">E-mail solicitado:</span>
+            <span className="font-bold text-gray-800 font-mono">{user?.email}</span>
+          </div>
+          <div className="flex justify-between items-center">
+            <span className="text-gray-500 font-medium">Status do pedido:</span>
+            <span className="font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-md">Pendente de Liberação</span>
+          </div>
+          <div className="flex justify-between items-center">
+            <span className="text-gray-500 font-medium">Data do cadastro:</span>
+            <span className="font-bold text-gray-700">{format(new Date(), "dd/MM/yyyy HH:mm")}</span>
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          <button
+            onClick={handleCheckAgain}
+            disabled={checking}
+            className="w-full py-3.5 bg-[#5A5A40] text-white font-semibold text-sm rounded-2xl hover:bg-[#4a4a30] transition-all flex items-center justify-center gap-2 shadow-md cursor-pointer"
+          >
+            {checking ? <Loader2 size={18} className="animate-spin" /> : <RefreshCw size={18} />}
+            <span>Verificar se já foi aprovado</span>
+          </button>
+
+          <button
+            onClick={onLogout}
+            className="w-full py-3.5 bg-gray-100 text-gray-700 font-semibold text-sm rounded-2xl hover:bg-gray-200 transition-all flex items-center justify-center gap-2 cursor-pointer"
+          >
+            <LogOut size={18} />
+            <span>Sair / Entrar com outra conta</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AccessDeniedScreen({ user, onLogout }: { user: any; onLogout: () => void }) {
+  return (
+    <div className="min-h-screen bg-[#f5f5f0] flex items-center justify-center p-4">
+      <div className="bg-white w-full max-w-lg rounded-[32px] border border-red-200 shadow-2xl p-8 text-center animate-in fade-in zoom-in duration-200">
+        <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center text-red-600 mx-auto mb-6 shadow-inner">
+          <AlertCircle size={32} />
+        </div>
+        
+        <span className="inline-block px-3 py-1 bg-red-100 text-red-800 text-xs font-bold rounded-full uppercase tracking-wider mb-3">
+          Acesso Não Aprovado
+        </span>
+
+        <h2 className="text-2xl font-display font-bold text-gray-900 tracking-tight mb-2">
+          Acesso Recusado ao Sistema
+        </h2>
+
+        <p className="text-sm text-[#5A5A40] leading-relaxed mb-6">
+          A solicitação de acesso para a conta de e-mail <strong>{user?.email}</strong> não foi aprovada pelo Administrador do sistema.
+        </p>
+
+        <button
+          onClick={onLogout}
+          className="w-full py-3.5 bg-red-600 text-white font-semibold text-sm rounded-2xl hover:bg-red-700 transition-all flex items-center justify-center gap-2 shadow-md cursor-pointer"
+        >
+          <LogOut size={18} />
+          <span>Sair do Sistema</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [isLocalMode, setIsLocalMode] = useState(() => {
     return localStorage.getItem('lotes_isLocalMode') === 'true';
   });
   const [user, setUser] = useState<User | null>(null);
+  const [currentUserProfile, setCurrentUserProfile] = useState<UserProfile | null>(null);
+  const [userProfileLoading, setUserProfileLoading] = useState<boolean>(true);
+  const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [batches, setBatches] = useState<Batch[]>([]);
   const [pacs, setPacs] = useState<ConfigItem[]>([]);
@@ -382,7 +488,7 @@ export default function App() {
 
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('open'); // Changed default to 'open'
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'config' | 'stats' | 'notifications' | 'tutorial'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'config' | 'stats' | 'notifications' | 'tutorial' | 'users'>('dashboard');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingBatch, setEditingBatch] = useState<Batch | null>(null);
   const [batchToDelete, setBatchToDelete] = useState<string | null>(null);
@@ -546,6 +652,206 @@ export default function App() {
     signOut(auth);
     setUser(null);
   };
+
+  // User Profile Firestore Sync
+  useEffect(() => {
+    if (isLocalMode) {
+      setCurrentUserProfile({
+        uid: 'client-demo',
+        email: user?.email || 'demo@ipempr.org',
+        displayName: user?.displayName || 'Convidado Local',
+        role: 'ADMIN',
+        status: 'APPROVED'
+      });
+      setUserProfileLoading(false);
+      return;
+    }
+
+    if (!user) {
+      setCurrentUserProfile(null);
+      setUserProfileLoading(false);
+      return;
+    }
+
+    setUserProfileLoading(true);
+    const profileRef = doc(db, 'user_profiles', user.uid);
+
+    const unsub = onSnapshot(profileRef, async (snap) => {
+      if (!snap.exists()) {
+        const isInitialAdmin = user.email?.toLowerCase() === 'ipempr.site@gmail.com';
+        
+        let initialRole: 'ADMIN' | 'OPERADOR' | 'VISUALIZADOR' = isInitialAdmin ? 'ADMIN' : 'OPERADOR';
+        let initialStatus: 'PENDING' | 'APPROVED' | 'REJECTED' = isInitialAdmin ? 'APPROVED' : 'PENDING';
+        let approvedBy = isInitialAdmin ? 'Sistema (Admin Padrão)' : undefined;
+
+        // Check if user email was pre-approved by Admin
+        try {
+          const userEmailNormalized = user.email?.toLowerCase().trim() || '';
+          if (userEmailNormalized) {
+            const qPre = query(collection(db, 'user_profiles'), where('email', '==', userEmailNormalized));
+            const preSnap = await getDocs(qPre);
+            if (!preSnap.empty) {
+              const preData = preSnap.docs[0].data() as UserProfile;
+              initialRole = preData.role || initialRole;
+              initialStatus = preData.status || initialStatus;
+              approvedBy = preData.approvedBy || 'Pré-aprovado pelo Administrador';
+
+              if (preSnap.docs[0].id !== user.uid) {
+                deleteDoc(preSnap.docs[0].ref).catch(() => {});
+              }
+            }
+          }
+        } catch (e) {
+          console.warn("Verificação de pré-aprovação:", e);
+        }
+
+        const initialProfile: UserProfile = {
+          uid: user.uid,
+          email: user.email || '',
+          displayName: user.displayName || user.email || 'Usuário',
+          photoURL: user.photoURL || '',
+          role: initialRole,
+          status: initialStatus,
+          approvedBy,
+          createdAt: Timestamp.now(),
+          updatedAt: Timestamp.now()
+        };
+
+        try {
+          await setDoc(profileRef, initialProfile);
+          setCurrentUserProfile(initialProfile);
+        } catch (err) {
+          console.error("Erro ao registrar perfil do usuário:", err);
+          handleFirestoreError(err, OperationType.WRITE, `user_profiles/${user.uid}`);
+        }
+      } else {
+        const data = snap.data() as UserProfile;
+        setCurrentUserProfile(data);
+      }
+      setUserProfileLoading(false);
+    }, (err) => {
+      console.error("Erro ao observar perfil do usuário:", err);
+      setUserProfileLoading(false);
+    });
+
+    return () => unsub();
+  }, [user, isLocalMode]);
+
+  // Fetch all user profiles for Admin
+  useEffect(() => {
+    if (isLocalMode) {
+      setAllUsers([
+        {
+          uid: 'client-demo',
+          email: user?.email || 'demo@ipempr.org',
+          displayName: user?.displayName || 'Convidado Local',
+          role: 'ADMIN',
+          status: 'APPROVED'
+        }
+      ]);
+      return;
+    }
+
+    if (currentUserProfile?.role !== 'ADMIN') {
+      setAllUsers([]);
+      return;
+    }
+
+    const q = query(collection(db, 'user_profiles'));
+    const unsub = onSnapshot(q, (snap) => {
+      const list: UserProfile[] = [];
+      snap.forEach((d) => {
+        list.push(d.data() as UserProfile);
+      });
+      setAllUsers(list);
+    }, (err) => {
+      console.error("Erro ao carregar lista de usuários:", err);
+    });
+
+    return () => unsub();
+  }, [currentUserProfile?.role, isLocalMode]);
+
+  const handleUpdateUserStatus = async (
+    targetUid: string,
+    newStatus: 'APPROVED' | 'REJECTED',
+    newRole: 'ADMIN' | 'OPERADOR' | 'VISUALIZADOR'
+  ) => {
+    if (isLocalMode) {
+      setAllUsers(prev => prev.map(u => u.uid === targetUid ? { ...u, status: newStatus, role: newRole } : u));
+      return;
+    }
+
+    try {
+      await setDoc(doc(db, 'user_profiles', targetUid), {
+        status: newStatus,
+        role: newRole,
+        approvedBy: currentUserProfile?.email || user?.email || 'Administrador',
+        updatedAt: Timestamp.now()
+      }, { merge: true });
+    } catch (err) {
+      console.error("Erro ao atualizar perfil do usuário:", err);
+      handleFirestoreError(err, OperationType.UPDATE, `user_profiles/${targetUid}`);
+    }
+  };
+
+  const handleAddPreApprovedUser = async (
+    email: string,
+    displayName: string,
+    role: 'ADMIN' | 'OPERADOR' | 'VISUALIZADOR'
+  ) => {
+    const normalizedEmail = email.toLowerCase().trim();
+    const docId = `pre_${normalizedEmail.replace(/[^a-z0-9]/g, '_')}`;
+
+    const newProfile: UserProfile = {
+      uid: docId,
+      email: normalizedEmail,
+      displayName: displayName.trim() || normalizedEmail.split('@')[0],
+      role: role,
+      status: 'APPROVED',
+      approvedBy: currentUserProfile?.email || user?.email || 'Administrador',
+      createdAt: Timestamp.now(),
+      updatedAt: Timestamp.now()
+    };
+
+    if (isLocalMode) {
+      setAllUsers(prev => [...prev.filter(u => u.email !== normalizedEmail), newProfile]);
+      return;
+    }
+
+    try {
+      await setDoc(doc(db, 'user_profiles', docId), newProfile);
+    } catch (err) {
+      console.error("Erro ao pré-aprovar e-mail:", err);
+      handleFirestoreError(err, OperationType.WRITE, `user_profiles/${docId}`);
+    }
+  };
+
+  const handleDeleteUserProfile = async (targetUid: string) => {
+    if (isLocalMode) {
+      setAllUsers(prev => prev.filter(u => u.uid !== targetUid));
+      return;
+    }
+
+    try {
+      await deleteDoc(doc(db, 'user_profiles', targetUid));
+    } catch (err) {
+      console.error("Erro ao excluir perfil de usuário:", err);
+      handleFirestoreError(err, OperationType.DELETE, `user_profiles/${targetUid}`);
+    }
+  };
+
+  const isInitialSuperAdmin = user?.email?.toLowerCase() === 'ipempr.site@gmail.com';
+  const isUserAdmin = isLocalMode || isInitialSuperAdmin || currentUserProfile?.role === 'ADMIN';
+  const isUserOperator = currentUserProfile?.role === 'OPERADOR';
+  const isUserViewer = currentUserProfile?.role === 'VISUALIZADOR';
+
+  const canEditData = isUserAdmin || isUserOperator;
+  const canDeleteBatch = isUserAdmin;
+  const canManageConfigs = isUserAdmin;
+
+  const pendingUsersCount = useMemo(() => {
+    return allUsers.filter(u => u.status === 'PENDING').length;
+  }, [allUsers]);
 
   // Data Fetching
   useEffect(() => {
@@ -1312,6 +1618,41 @@ export default function App() {
     );
   }
 
+  if (!isLocalMode && userProfileLoading) {
+    return (
+      <div className="min-h-screen bg-[#f5f5f0] flex flex-col items-center justify-center p-6 text-center">
+        <Loader2 size={40} className="animate-spin text-[#5A5A40] mb-4" />
+        <h3 className="text-lg font-bold text-gray-800">Verificando autorizações de acesso...</h3>
+        <p className="text-xs text-[#5A5A40]/70 mt-1">Carregando perfil e permissões para {user.email}</p>
+      </div>
+    );
+  }
+
+  if (!isLocalMode && currentUserProfile?.status === 'PENDING') {
+    return (
+      <PendingApprovalScreen 
+        user={user} 
+        onRefresh={async () => {
+          const profileRef = doc(db, 'user_profiles', user.uid);
+          const snap = await getDocFromServer(profileRef);
+          if (snap.exists()) {
+            setCurrentUserProfile(snap.data() as UserProfile);
+          }
+        }} 
+        onLogout={handleLogout} 
+      />
+    );
+  }
+
+  if (!isLocalMode && currentUserProfile?.status === 'REJECTED') {
+    return (
+      <AccessDeniedScreen 
+        user={user} 
+        onLogout={handleLogout} 
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#f5f5f0] text-[#1a1a1a] font-sans">
       {/* Header */}
@@ -1356,6 +1697,23 @@ export default function App() {
               >
                 Configurações
               </button>
+              {isUserAdmin && (
+                <button 
+                  onClick={() => setActiveTab('users')}
+                  className={cn(
+                    "px-4 py-2 rounded-full text-sm font-medium transition-all flex items-center gap-1.5 relative",
+                    activeTab === 'users' ? "bg-[#5A5A40] text-white" : "text-[#5A5A40] hover:bg-[#f0f0e5]"
+                  )}
+                >
+                  <ShieldCheck size={16} />
+                  <span>Acessos</span>
+                  {pendingUsersCount > 0 && (
+                    <span className="bg-amber-500 text-white text-[10px] font-extrabold px-2 py-0.5 rounded-full shadow-sm animate-pulse">
+                      {pendingUsersCount}
+                    </span>
+                  )}
+                </button>
+              )}
               <button 
                 onClick={() => setActiveTab('tutorial')}
                 className={cn(
@@ -1370,7 +1728,19 @@ export default function App() {
           
           <div className="flex items-center gap-4">
             <div className="text-right hidden sm:block">
-              <p className="text-sm font-medium">{user.displayName}</p>
+              <div className="flex items-center justify-end gap-2">
+                <p className="text-sm font-medium">{user.displayName}</p>
+                {currentUserProfile?.role && (
+                  <span className={cn(
+                    "text-[9px] font-extrabold px-2 py-0.5 rounded-full border uppercase tracking-wider",
+                    currentUserProfile.role === 'ADMIN' ? "bg-purple-100 text-purple-800 border-purple-200" :
+                    currentUserProfile.role === 'OPERADOR' ? "bg-blue-100 text-blue-800 border-blue-200" :
+                    "bg-emerald-100 text-emerald-800 border-emerald-200"
+                  )}>
+                    {currentUserProfile.role}
+                  </span>
+                )}
+              </div>
               <div className="flex flex-col items-end gap-0.5">
                 <p className="text-xs text-[#5A5A40]">{user.email}</p>
                 {isLocalMode ? (
@@ -1673,16 +2043,22 @@ export default function App() {
                   </select>
                 </div>
               </div>
-              <button 
-                onClick={() => {
-                  setEditingBatch(null);
-                  setIsModalOpen(true);
-                }}
-                className="w-full md:w-auto bg-[#5A5A40] text-white px-6 py-3 rounded-2xl font-medium hover:bg-[#4a4a30] transition-all flex items-center justify-center gap-2 shadow-lg shadow-[#5A5A40]/10 shrink-0"
-              >
-                <Plus size={20} />
-                Receber Novo Lote
-              </button>
+              {canEditData ? (
+                <button 
+                  onClick={() => {
+                    setEditingBatch(null);
+                    setIsModalOpen(true);
+                  }}
+                  className="w-full md:w-auto bg-[#5A5A40] text-white px-6 py-3 rounded-2xl font-medium hover:bg-[#4a4a30] transition-all flex items-center justify-center gap-2 shadow-lg shadow-[#5A5A40]/10 shrink-0 cursor-pointer"
+                >
+                  <Plus size={20} />
+                  Receber Novo Lote
+                </button>
+              ) : (
+                <span className="text-xs font-semibold text-gray-500 bg-gray-100 border border-gray-200 px-4 py-3 rounded-2xl flex items-center gap-1.5 cursor-not-allowed">
+                  <Lock size={14} /> Modo Leitura (Visualizador)
+                </span>
+              )}
             </div>
 
             {/* Batches Grid */}
@@ -1691,6 +2067,8 @@ export default function App() {
                 <BatchCard 
                   key={batch.id} 
                   batch={batch} 
+                  canEdit={canEditData}
+                  canDelete={canDeleteBatch}
                   onEdit={() => {
                     setEditingBatch(batch);
                     setIsModalOpen(true);
@@ -1782,6 +2160,26 @@ export default function App() {
               setIsConfigUnlocked={setIsConfigUnlocked}
               setActiveTab={setActiveTab}
             />
+          )
+        ) : activeTab === 'users' ? (
+          isUserAdmin ? (
+            <UserManagementPanel 
+              currentUser={user}
+              currentUserProfile={currentUserProfile}
+              allUsers={allUsers}
+              isLocalMode={isLocalMode}
+              onUpdateUserStatus={handleUpdateUserStatus}
+              onAddPreApprovedUser={handleAddPreApprovedUser}
+              onDeleteUserProfile={handleDeleteUserProfile}
+            />
+          ) : (
+            <div className="bg-white p-12 rounded-[32px] border border-red-200 text-center space-y-4">
+              <AlertCircle size={48} className="mx-auto text-red-500" />
+              <h3 className="text-xl font-bold text-gray-900">Acesso Restrito</h3>
+              <p className="text-sm text-gray-600">
+                A gestão de usuários é exclusiva para contas com nível de permissão Administrador.
+              </p>
+            </div>
           )
         ) : (
           <SystemTutorial />
@@ -1913,7 +2311,7 @@ function ConfirmModal({ title, message, onConfirm, onCancel }: any) {
   );
 }
 
-function BatchCard({ batch, onEdit, onDelete }: any) {
+function BatchCard({ batch, onEdit, onDelete, canEdit = true, canDelete = true }: any) {
   const formatDate = (ts?: Timestamp) => ts ? format(ts.toDate(), "dd/MM/yyyy HH:mm", { locale: ptBR }) : '-';
   const formatPeriod = (ts: Timestamp) => format(ts.toDate(), "dd/MM/yyyy", { locale: ptBR });
 
@@ -1967,12 +2365,14 @@ function BatchCard({ batch, onEdit, onDelete }: any) {
                 )}>
                   {dynamicStatus}
                 </span>
-                <button onClick={onEdit} className="p-2 hover:bg-[#f0f0e5] rounded-full text-[#5A5A40] transition-colors">
-                  <Edit3 size={18} />
+                <button onClick={onEdit} className="p-2 hover:bg-[#f0f0e5] rounded-full text-[#5A5A40] transition-colors" title={canEdit ? "Editar Lote" : "Visualizar Detalhes"}>
+                  {canEdit ? <Edit3 size={18} /> : <Eye size={18} />}
                 </button>
-                <button onClick={onDelete} className="p-2 hover:bg-red-50 rounded-full text-red-500 transition-colors">
-                  <Trash2 size={18} />
-                </button>
+                {canDelete && (
+                  <button onClick={onDelete} className="p-2 hover:bg-red-50 rounded-full text-red-500 transition-colors" title="Excluir Lote">
+                    <Trash2 size={18} />
+                  </button>
+                )}
               </div>
           </div>
 
