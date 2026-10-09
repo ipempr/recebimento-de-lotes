@@ -2433,33 +2433,57 @@ export default function NotificationsPanel({
             return;
           }
 
+          const escapeHtml = (unsafe: string) => {
+            return (unsafe || '')
+              .replace(/&/g, "&amp;")
+              .replace(/</g, "&lt;")
+              .replace(/>/g, "&gt;")
+              .replace(/"/g, "&quot;")
+              .replace(/'/g, "&#039;");
+          };
+
+          const rawDefenseText = viewingReceiptForNotif.defenseText || '(Nenhum texto de defesa informado)';
+          const safeDefenseText = escapeHtml(rawDefenseText);
+
           const printHtml = `
             <!DOCTYPE html>
-            <html>
+            <html lang="pt-BR">
             <head>
+              <meta charset="UTF-8">
               <title>Comprovante de Entrega de Defesa Administrativa - IPEM-PR</title>
               <style>
+                @page {
+                  size: A4 portrait;
+                  margin: 15mm 15mm 20mm 15mm;
+                }
+                * {
+                  box-sizing: border-box;
+                }
                 body {
-                  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+                  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
                   color: #1a1a1a;
                   line-height: 1.5;
-                  padding: 40px;
+                  padding: 20px 0;
                   background: #fff;
+                  margin: 0;
                 }
                 .container {
-                  max-width: 800px;
+                  max-width: 820px;
                   margin: 0 auto;
                   border: 2px solid #e5e5e0;
-                  padding: 40px;
+                  padding: 35px;
                   border-radius: 16px;
+                  background: #fff;
                 }
                 .header {
                   display: flex;
                   align-items: center;
                   justify-content: space-between;
-                  border-b: 2px solid #e5e5e0;
-                  padding-bottom: 20px;
-                  margin-bottom: 30px;
+                  border-bottom: 2px solid #e5e5e0;
+                  padding-bottom: 18px;
+                  margin-bottom: 25px;
+                  page-break-inside: avoid;
+                  break-inside: avoid;
                 }
                 .header-logo-text {
                   flex: 1;
@@ -2489,7 +2513,7 @@ export default function NotificationsPanel({
                   text-align: right;
                   background: #fcfcf9;
                   border: 1px solid #e5e5e0;
-                  padding: 12px 18px;
+                  padding: 10px 16px;
                   border-radius: 12px;
                 }
                 .protocol-label {
@@ -2499,7 +2523,7 @@ export default function NotificationsPanel({
                   color: #5A5A40;
                 }
                 .protocol-val {
-                  font-size: 16px;
+                  font-size: 15px;
                   font-weight: 800;
                   color: #047857;
                   font-family: monospace;
@@ -2509,18 +2533,22 @@ export default function NotificationsPanel({
                   font-size: 15px;
                   font-weight: 800;
                   text-transform: uppercase;
-                  margin: 30px 0;
+                  margin: 24px 0;
                   letter-spacing: 0.05em;
                   border-bottom: 1px solid #e5e5e0;
                   border-top: 1px solid #e5e5e0;
                   padding: 10px 0;
+                  page-break-inside: avoid;
+                  break-inside: avoid;
                 }
                 .grid {
                   display: grid;
-                  grid-template-columns: 150px 1fr;
+                  grid-template-columns: 160px 1fr;
                   gap: 12px;
                   font-size: 12px;
-                  margin-bottom: 30px;
+                  margin-bottom: 25px;
+                  page-break-inside: avoid;
+                  break-inside: avoid;
                 }
                 .label {
                   font-weight: 700;
@@ -2531,29 +2559,48 @@ export default function NotificationsPanel({
                 .val {
                   color: #1a1a1a;
                 }
+                .defense-section-title {
+                  font-weight: 700;
+                  color: #5A5A40;
+                  text-transform: uppercase;
+                  font-size: 10px;
+                  margin-bottom: 8px;
+                  page-break-inside: avoid;
+                  break-inside: avoid;
+                }
                 .defense-box {
                   background: #f9f9f6;
                   border: 1px solid #e5e5e0;
                   border-radius: 12px;
                   padding: 20px;
-                  font-size: 12px;
+                  font-size: 11.5px;
+                  line-height: 1.6;
                   white-space: pre-wrap;
-                  margin-bottom: 30px;
-                  font-family: 'JetBrains Mono', monospace;
-                  max-height: 400px;
-                  overflow-y: auto;
+                  word-break: break-word;
+                  overflow-wrap: anywhere;
+                  margin-bottom: 25px;
+                  font-family: 'JetBrains Mono', Consolas, Monaco, monospace;
+                  max-height: none !important;
+                  height: auto !important;
+                  overflow: visible !important;
+                  page-break-inside: auto;
+                  break-inside: auto;
+                  color: #1a1a1a;
                 }
                 .footer {
                   border-top: 1px solid #e5e5e0;
-                  padding-top: 25px;
+                  padding-top: 20px;
                   display: flex;
                   justify-content: space-between;
                   align-items: flex-end;
                   font-size: 11px;
+                  page-break-inside: avoid;
+                  break-inside: avoid;
+                  margin-top: 20px;
                 }
                 .footer-text {
                   color: #666;
-                  max-width: 450px;
+                  max-width: 460px;
                 }
                 .signature-box {
                   text-align: center;
@@ -2561,7 +2608,7 @@ export default function NotificationsPanel({
                 }
                 .signature-line {
                   border-top: 1px solid #1a1a1a;
-                  margin-top: 50px;
+                  margin-top: 40px;
                   padding-top: 5px;
                   font-weight: bold;
                   font-size: 10px;
@@ -2575,15 +2622,106 @@ export default function NotificationsPanel({
                   font-family: monospace;
                   font-size: 10px;
                   color: #666;
-                  margin-top: 15px;
+                  margin-top: 12px;
                   background: #f3f3ee;
-                  padding: 6px;
+                  padding: 6px 8px;
                   border-radius: 6px;
                   display: inline-block;
+                }
+                .no-print {
+                  display: block;
+                }
+                .action-bar {
+                  max-width: 820px;
+                  margin: 0 auto 16px auto;
+                  background: #fcfbf9;
+                  border: 1px solid #e5e5e0;
+                  padding: 10px 16px;
+                  border-radius: 12px;
+                  display: flex;
+                  justify-content: space-between;
+                  align-items: center;
+                }
+                .print-btn {
+                  background: #047857;
+                  color: #fff;
+                  border: none;
+                  padding: 8px 18px;
+                  border-radius: 8px;
+                  font-weight: 700;
+                  font-size: 12px;
+                  cursor: pointer;
+                  display: inline-flex;
+                  align-items: center;
+                  gap: 6px;
+                }
+                .print-btn:hover {
+                  background: #065f46;
+                }
+                .close-btn {
+                  background: #fff;
+                  color: #555;
+                  border: 1px solid #d1d5db;
+                  padding: 8px 14px;
+                  border-radius: 8px;
+                  font-size: 12px;
+                  cursor: pointer;
+                }
+
+                @media print {
+                  body {
+                    padding: 0 !important;
+                    margin: 0 !important;
+                    background: #fff !important;
+                    -webkit-print-color-adjust: exact !important;
+                    print-color-adjust: exact !important;
+                  }
+                  .no-print {
+                    display: none !important;
+                  }
+                  .container {
+                    max-width: 100% !important;
+                    margin: 0 !important;
+                    padding: 0 !important;
+                    border: none !important;
+                    border-radius: 0 !important;
+                    box-shadow: none !important;
+                  }
+                  .defense-box {
+                    max-height: none !important;
+                    height: auto !important;
+                    overflow: visible !important;
+                    page-break-inside: auto !important;
+                    break-inside: auto !important;
+                    background: #f9f9f6 !important;
+                    border: 1px solid #dcdcd6 !important;
+                  }
+                  .header, .doc-title, .grid {
+                    page-break-inside: avoid !important;
+                    break-inside: avoid !important;
+                  }
+                  .footer {
+                    page-break-inside: avoid !important;
+                    break-inside: avoid !important;
+                  }
                 }
               </style>
             </head>
             <body>
+              <div class="no-print action-bar">
+                <span style="font-size: 12px; font-weight: 700; color: #5A5A40;">
+                  Comprovante Oficial de Entrega de Defesa Administrativa (NIT-DICOL-014)
+                </span>
+                <div style="display: flex; gap: 8px;">
+                  <button class="print-btn" onclick="window.print()">
+                    🖨️ Imprimir / Salvar como PDF
+                  </button>
+                  <button class="close-btn" onclick="window.close()">
+                    Fechar
+                  </button>
+                </div>
+              </div>
+
               <div class="container">
                 <div class="header">
                   <div class="header-logo-text">
@@ -2607,16 +2745,16 @@ export default function NotificationsPanel({
 
                 <div class="grid">
                   <div class="label">Interessado (PAC)</div>
-                  <div class="val" style="font-weight: bold;">${pacRazaoSocial}</div>
+                  <div class="val" style="font-weight: bold;">${escapeHtml(pacRazaoSocial)}</div>
 
                   <div class="label">CNPJ / CPF</div>
-                  <div class="val">${pacCNPJ || 'Não informado'}</div>
+                  <div class="val">${escapeHtml(pacCNPJ || 'Não informado')}</div>
 
                   <div class="label">Notificação de Ref.</div>
-                  <div class="val">#${viewingReceiptForNotif.id ? viewingReceiptForNotif.id.substring(0, 10).toUpperCase() : '-'} (${viewingReceiptForNotif.notification_type_name || 'Autuação'})</div>
+                  <div class="val">#${viewingReceiptForNotif.id ? escapeHtml(viewingReceiptForNotif.id.substring(0, 10).toUpperCase()) : '-'} (${escapeHtml(viewingReceiptForNotif.notification_type_name || 'Autuação')})</div>
 
                   <div class="label">Processo IPEM-PR</div>
-                  <div class="val">${viewingReceiptForNotif.customOficioProcess || viewingReceiptForNotif.id || '-'}</div>
+                  <div class="val">${escapeHtml(viewingReceiptForNotif.customOficioProcess || viewingReceiptForNotif.id || '-')}</div>
 
                   <div class="label">Data de Emissão</div>
                   <div class="val">${formatDateShort(viewingReceiptForNotif.createdAt)}</div>
@@ -2625,13 +2763,13 @@ export default function NotificationsPanel({
                   <div class="val" style="font-weight: bold; color: #047857;">${formatDateTime(viewingReceiptForNotif.defenseReceivedAt || new Date())}</div>
                 </div>
 
-                <div class="label" style="margin-bottom: 8px;">Teor da Defesa Registrada</div>
-                <div class="defense-box">${viewingReceiptForNotif.defenseText || '(Nenhum texto de defesa informado)'}</div>
+                <div class="defense-section-title">Teor da Defesa Registrada (Texto Integral)</div>
+                <div class="defense-box">${safeDefenseText}</div>
 
                 <div class="footer">
                   <div class="footer-text">
                     <p style="margin: 0; font-weight: bold;">Declaração de Validade Processual</p>
-                    <p style="margin: 4px 0 0 0; color: #555; leading-relaxed: 1.4;">
+                    <p style="margin: 4px 0 0 0; color: #555; line-height: 1.4;">
                       O Departamento de Avaliação Técnica do IPEM-PR certifica para os devidos fins regulamentares e processuais que a petição de defesa retro citada foi devidamente protocolada e recebida por via eletrônica. A tempestividade e o teor dos dados declarados foram autenticados de acordo com a NIT-DICOL-014.
                     </p>
                     <div class="hash-box">
@@ -2646,7 +2784,9 @@ export default function NotificationsPanel({
               </div>
               <script>
                 window.onload = function() {
-                  window.print();
+                  setTimeout(function() {
+                    window.print();
+                  }, 300);
                 }
               </script>
             </body>
@@ -2721,8 +2861,15 @@ export default function NotificationsPanel({
 
                   {/* Defense text box */}
                   <div className="space-y-1.5 pt-2">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block">Teor da Defesa Apresentada</span>
-                    <div className="bg-gray-50 hover:bg-gray-50/80 transition-colors p-4 rounded-xl border border-gray-100 text-xs font-mono text-gray-800 max-h-40 overflow-y-auto whitespace-pre-wrap leading-relaxed">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block">Teor da Defesa Apresentada</span>
+                      {viewingReceiptForNotif.defenseText && (
+                        <span className="text-[9px] text-gray-400 font-mono font-medium">
+                          {viewingReceiptForNotif.defenseText.length} caracteres
+                        </span>
+                      )}
+                    </div>
+                    <div className="bg-gray-50 hover:bg-gray-50/80 transition-colors p-4 rounded-xl border border-gray-100 text-xs font-mono text-gray-800 max-h-60 overflow-y-auto whitespace-pre-wrap leading-relaxed select-text">
                       {viewingReceiptForNotif.defenseText || '(Nenhum texto de defesa informado)'}
                     </div>
                   </div>
