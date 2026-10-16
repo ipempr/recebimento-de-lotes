@@ -2523,8 +2523,11 @@ function BatchModal({ isOpen, onClose, batch, pacs, collaborators, statuses, non
     numEnsaios: batch?.numEnsaios || 0,
     status: batch?.status || 'ABERTO', // Default to ABERTO
     recebidoPor: batch?.recebidoPor || '',
+    recebidoEmDate: batch?.recebidoEm ? format(batch.recebidoEm.toDate(), "yyyy-MM-dd") : (batch ? '' : format(new Date(), "yyyy-MM-dd")),
     lidoPor: batch?.lidoPor || '',
+    lidoEmDate: batch?.lidoEm ? format(batch.lidoEm.toDate(), "yyyy-MM-dd") : '',
     conferidoPor: batch?.conferidoPor || '',
+    conferidoEmDate: batch?.conferidoEm ? format(batch.conferidoEm.toDate(), "yyyy-MM-dd") : '',
     ensaioForaDoPrazo: batch?.ensaioForaDoPrazo || false,
   });
 
@@ -2624,16 +2627,73 @@ function BatchModal({ isOpen, onClose, batch, pacs, collaborators, statuses, non
         normPac = 'JOSÉ CALIXTO';
       }
 
+      // Compute exact insertion timestamp for each production activity:
+      // When a collaborator name is inserted or changed, its date is recorded.
+      // If dates differ between fields, each field preserves its respective insertion date.
+      const computeActivityTimestamp = (
+        collabName: string,
+        dateStr: string,
+        existingCollabName: string | undefined,
+        existingTimestamp: any
+      ) => {
+        const cleanName = (collabName || '').trim();
+        if (!cleanName) return null;
+
+        if (dateStr) {
+          if (existingTimestamp && cleanName === (existingCollabName || '').trim()) {
+            try {
+              const existingDate = existingTimestamp.toDate ? existingTimestamp.toDate() : new Date(existingTimestamp.seconds * 1000);
+              const existingDateStr = format(existingDate, "yyyy-MM-dd");
+              if (existingDateStr === dateStr) {
+                return existingTimestamp;
+              }
+            } catch {
+              // fallback
+            }
+          }
+          return getTimestampFromDate(parseLocalDate(dateStr));
+        }
+
+        if (cleanName === (existingCollabName || '').trim() && existingTimestamp) {
+          return existingTimestamp;
+        }
+
+        return getTimestampNow();
+      };
+
+      const finalRecebidoEm = computeActivityTimestamp(
+        formData.recebidoPor,
+        formData.recebidoEmDate,
+        batch?.recebidoPor,
+        batch?.recebidoEm
+      );
+
+      const finalLidoEm = computeActivityTimestamp(
+        formData.lidoPor,
+        formData.lidoEmDate,
+        batch?.lidoPor,
+        batch?.lidoEm
+      );
+
+      const finalConferidoEm = computeActivityTimestamp(
+        formData.conferidoPor,
+        formData.conferidoEmDate,
+        batch?.conferidoPor,
+        batch?.conferidoEm
+      );
+
+      const { recebidoEmDate, lidoEmDate, conferidoEmDate, ...cleanFormData } = formData;
+
       const data = {
-        ...formData,
+        ...cleanFormData,
         pac: normPac,
         status: finalStatus,
         numEnsaios: Number(formData.numEnsaios),
         periodoInicial: getTimestampFromDate(parseLocalDate(formData.periodoInicial)),
         periodoFinal: getTimestampFromDate(parseLocalDate(formData.periodoFinal)),
-        recebidoEm: batch?.recebidoEm || getTimestampNow(),
-        lidoEm: formData.lidoPor.trim() ? (batch?.lidoPor ? batch.lidoEm : getTimestampNow()) : null,
-        conferidoEm: formData.conferidoPor.trim() ? (batch?.conferidoPor ? batch.conferidoEm : getTimestampNow()) : null,
+        recebidoEm: finalRecebidoEm || (batch?.recebidoEm || getTimestampNow()),
+        lidoEm: finalLidoEm,
+        conferidoEm: finalConferidoEm,
       };
 
       if (isLocalMode) {
@@ -2894,41 +2954,133 @@ function BatchModal({ isOpen, onClose, batch, pacs, collaborators, statuses, non
           </div>
 
           <div className="pt-6 border-t border-[#e5e5e0] space-y-4">
-            <h4 className="text-sm font-bold uppercase text-[#5A5A40] opacity-50">Produção</h4>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold uppercase text-[#5A5A40]">Recebido Por</label>
-                <select 
-                  required
-                  className="w-full p-2 bg-[#f5f5f0] border-none rounded-lg text-sm"
-                  value={formData.recebidoPor}
-                  onChange={e => setFormData({...formData, recebidoPor: e.target.value})}
-                >
-                  <option value="">-</option>
-                  {collaborators.map((c: any) => <option key={c.id} value={c.name}>{c.name}</option>)}
-                </select>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+              <h4 className="text-sm font-bold uppercase text-[#5A5A40] opacity-50">Produção</h4>
+              <span className="text-[10px] text-gray-500 font-medium">
+                Datas de inserção individuais para apuração de produtividade
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Recebido Por */}
+              <div className="p-3 bg-[#fbfbfa] rounded-2xl border border-[#e5e5e0] space-y-2">
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] font-bold uppercase text-[#5A5A40]">Recebido Por</label>
+                    {formData.recebidoEmDate && (
+                      <span className="text-[9px] font-mono text-gray-400">
+                        {format(parseLocalDate(formData.recebidoEmDate), 'dd/MM/yyyy')}
+                      </span>
+                    )}
+                  </div>
+                  <select 
+                    required
+                    className="w-full p-2 bg-white border border-[#e5e5e0] rounded-lg text-sm font-medium focus:ring-2 focus:ring-[#5A5A40]/20"
+                    value={formData.recebidoPor}
+                    onChange={e => {
+                      const val = e.target.value;
+                      setFormData(prev => ({
+                        ...prev,
+                        recebidoPor: val,
+                        recebidoEmDate: val ? (prev.recebidoEmDate || format(new Date(), "yyyy-MM-dd")) : ''
+                      }));
+                    }}
+                  >
+                    <option value="">- Selecione -</option>
+                    {collaborators.map((c: any) => <option key={c.id} value={c.name}>{c.name}</option>)}
+                  </select>
+                </div>
+                {formData.recebidoPor && (
+                  <div className="space-y-1 pt-1 border-t border-gray-100">
+                    <label className="text-[9px] font-bold uppercase text-gray-500">Data de Recebimento</label>
+                    <input
+                      type="date"
+                      className="w-full p-1.5 bg-white border border-[#e5e5e0] rounded-lg text-xs font-mono text-gray-700 focus:ring-1 focus:ring-[#5A5A40]/30"
+                      value={formData.recebidoEmDate}
+                      onChange={e => setFormData({ ...formData, recebidoEmDate: e.target.value })}
+                    />
+                  </div>
+                )}
               </div>
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold uppercase text-[#5A5A40]">Lido Por</label>
-                <select 
-                  className="w-full p-2 bg-[#f5f5f0] border-none rounded-lg text-sm"
-                  value={formData.lidoPor}
-                  onChange={e => setFormData({...formData, lidoPor: e.target.value})}
-                >
-                  <option value="">-</option>
-                  {collaborators.map((c: any) => <option key={c.id} value={c.name}>{c.name}</option>)}
-                </select>
+
+              {/* Lido Por */}
+              <div className="p-3 bg-[#fbfbfa] rounded-2xl border border-[#e5e5e0] space-y-2">
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] font-bold uppercase text-[#5A5A40]">Lido Por</label>
+                    {formData.lidoEmDate && (
+                      <span className="text-[9px] font-mono text-gray-400">
+                        {format(parseLocalDate(formData.lidoEmDate), 'dd/MM/yyyy')}
+                      </span>
+                    )}
+                  </div>
+                  <select 
+                    className="w-full p-2 bg-white border border-[#e5e5e0] rounded-lg text-sm font-medium focus:ring-2 focus:ring-[#5A5A40]/20"
+                    value={formData.lidoPor}
+                    onChange={e => {
+                      const val = e.target.value;
+                      setFormData(prev => ({
+                        ...prev,
+                        lidoPor: val,
+                        lidoEmDate: val ? (prev.lidoEmDate || format(new Date(), "yyyy-MM-dd")) : ''
+                      }));
+                    }}
+                  >
+                    <option value="">- Selecione -</option>
+                    {collaborators.map((c: any) => <option key={c.id} value={c.name}>{c.name}</option>)}
+                  </select>
+                </div>
+                {formData.lidoPor && (
+                  <div className="space-y-1 pt-1 border-t border-gray-100">
+                    <label className="text-[9px] font-bold uppercase text-gray-500">Data de Leitura</label>
+                    <input
+                      type="date"
+                      className="w-full p-1.5 bg-white border border-[#e5e5e0] rounded-lg text-xs font-mono text-gray-700 focus:ring-1 focus:ring-[#5A5A40]/30"
+                      value={formData.lidoEmDate}
+                      onChange={e => setFormData({ ...formData, lidoEmDate: e.target.value })}
+                    />
+                  </div>
+                )}
               </div>
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold uppercase text-[#5A5A40]">Informado Por</label>
-                <select 
-                  className="w-full p-2 bg-[#f5f5f0] border-none rounded-lg text-sm"
-                  value={formData.conferidoPor}
-                  onChange={e => setFormData({...formData, conferidoPor: e.target.value})}
-                >
-                  <option value="">-</option>
-                  {collaborators.map((c: any) => <option key={c.id} value={c.name}>{c.name}</option>)}
-                </select>
+
+              {/* Informado Por */}
+              <div className="p-3 bg-[#fbfbfa] rounded-2xl border border-[#e5e5e0] space-y-2">
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] font-bold uppercase text-[#5A5A40]">Informado Por</label>
+                    {formData.conferidoEmDate && (
+                      <span className="text-[9px] font-mono text-gray-400">
+                        {format(parseLocalDate(formData.conferidoEmDate), 'dd/MM/yyyy')}
+                      </span>
+                    )}
+                  </div>
+                  <select 
+                    className="w-full p-2 bg-white border border-[#e5e5e0] rounded-lg text-sm font-medium focus:ring-2 focus:ring-[#5A5A40]/20"
+                    value={formData.conferidoPor}
+                    onChange={e => {
+                      const val = e.target.value;
+                      setFormData(prev => ({
+                        ...prev,
+                        conferidoPor: val,
+                        conferidoEmDate: val ? (prev.conferidoEmDate || format(new Date(), "yyyy-MM-dd")) : ''
+                      }));
+                    }}
+                  >
+                    <option value="">- Selecione -</option>
+                    {collaborators.map((c: any) => <option key={c.id} value={c.name}>{c.name}</option>)}
+                  </select>
+                </div>
+                {formData.conferidoPor && (
+                  <div className="space-y-1 pt-1 border-t border-gray-100">
+                    <label className="text-[9px] font-bold uppercase text-gray-500">Data de Informação</label>
+                    <input
+                      type="date"
+                      className="w-full p-1.5 bg-white border border-[#e5e5e0] rounded-lg text-xs font-mono text-gray-700 focus:ring-1 focus:ring-[#5A5A40]/30"
+                      value={formData.conferidoEmDate}
+                      onChange={e => setFormData({ ...formData, conferidoEmDate: e.target.value })}
+                    />
+                  </div>
+                )}
               </div>
 
               {/* Checkbox: ensaio entregue fora do prazo */}
@@ -5276,25 +5428,33 @@ function StatsPanel({ batches, collaborators, pacs, nonConformityRecords, isLoca
   }, [filterPreset, selectedYear, selectedMonth]);
 
   // Compute unique list of collaborators with actual production in the filtered period
+  // Evaluated based on the insertion date of each production field (recebidoEm, lidoEm, conferidoEm)
   const collabsWithProductionInPeriod = useMemo(() => {
     const list: string[] = [];
+    const startDate = statsStartDate ? startOfDay(parseLocalDate(statsStartDate)) : null;
+    const endDate = statsEndDate ? startOfDay(parseLocalDate(statsEndDate)) : null;
+
     batches.forEach(b => {
-      // Check date range
-      let inRange = true;
-      if (statsStartDate) {
-        const start = startOfDay(parseLocalDate(statsStartDate));
-        if (b.periodoInicial.toDate() < start) inRange = false;
-      }
-      if (statsEndDate) {
-        const end = startOfDay(parseLocalDate(statsEndDate));
-        if (startOfDay(b.periodoInicial.toDate()) > end) inRange = false;
+      // Recebido por
+      if (b.recebidoPor && b.recebidoPor.trim() !== '') {
+        const rDate = b.recebidoEm ? b.recebidoEm.toDate() : (b.periodoInicial ? b.periodoInicial.toDate() : null);
+        if (rDate && (!startDate || rDate >= startDate) && (!endDate || startOfDay(rDate) <= endDate)) {
+          list.push(b.recebidoPor.trim());
+        }
       }
 
-      if (inRange) {
-        if (b.lidoPor && b.lidoPor.trim() !== '') {
+      // Lido por
+      if (b.lidoPor && b.lidoPor.trim() !== '') {
+        const lDate = b.lidoEm ? b.lidoEm.toDate() : (b.recebidoEm ? b.recebidoEm.toDate() : (b.periodoInicial ? b.periodoInicial.toDate() : null));
+        if (lDate && (!startDate || lDate >= startDate) && (!endDate || startOfDay(lDate) <= endDate)) {
           list.push(b.lidoPor.trim());
         }
-        if (b.conferidoPor && b.conferidoPor.trim() !== '') {
+      }
+
+      // Informado por (conferidoPor)
+      if (b.conferidoPor && b.conferidoPor.trim() !== '') {
+        const cDate = b.conferidoEm ? b.conferidoEm.toDate() : (b.recebidoEm ? b.recebidoEm.toDate() : (b.periodoInicial ? b.periodoInicial.toDate() : null));
+        if (cDate && (!startDate || cDate >= startDate) && (!endDate || startOfDay(cDate) <= endDate)) {
           list.push(b.conferidoPor.trim());
         }
       }
@@ -5302,66 +5462,89 @@ function StatsPanel({ batches, collaborators, pacs, nonConformityRecords, isLoca
     return Array.from(new Set(list)).sort((a, b) => a.localeCompare(b));
   }, [batches, statsStartDate, statsEndDate]);
 
-  // Filter batches based on inputs
-  const filtered = useMemo(() => {
-    return batches.filter(b => {
-      // Name filter: either lidoPor or conferidoPor contains the selectedCollab
-      if (selectedCollab) {
-        const matchesCollab = (b.lidoPor === selectedCollab) || (b.conferidoPor === selectedCollab);
-        if (!matchesCollab) return false;
-      }
-
-      // Period filters based on periodoInicial
-      if (statsStartDate) {
-        const start = startOfDay(parseLocalDate(statsStartDate));
-        if (b.periodoInicial.toDate() < start) return false;
-      }
-      if (statsEndDate) {
-        const end = startOfDay(parseLocalDate(statsEndDate));
-        if (startOfDay(b.periodoInicial.toDate()) > end) return false;
-      }
-
-      return true;
-    });
-  }, [batches, selectedCollab, statsStartDate, statsEndDate]);
-
-  // Compute stats on the filtered batches
+  // Compute stats on batches using individual activity insertion dates
+  // (recebidoPor uses recebidoEm, lidoPor uses lidoEm, conferidoPor uses conferidoEm)
   const computedStats = useMemo(() => {
-    const productivity: Record<string, { lido: number, informado: number }> = {};
+    const productivity: Record<string, { recebido: number; lido: number; informado: number; total: number }> = {};
     
     let onTimeCount = 0;
     let lateCount = 0;
     let totalEnsaiosFinished = 0;
     let totalEnsaiosOpen = 0;
 
-    filtered.forEach(b => {
-      if (!b.conferidoPor) {
-        totalEnsaiosOpen += b.numEnsaios;
-      }
+    const startDate = statsStartDate ? startOfDay(parseLocalDate(statsStartDate)) : null;
+    const endDate = statsEndDate ? startOfDay(parseLocalDate(statsEndDate)) : null;
 
-      // Track reading productivity
-      if (b.lidoPor) {
-        if (!selectedCollab || b.lidoPor === selectedCollab) {
-          if (!productivity[b.lidoPor]) productivity[b.lidoPor] = { lido: 0, informado: 0 };
-          productivity[b.lidoPor].lido += b.numEnsaios;
+    batches.forEach(b => {
+      const ensaios = Number(b.numEnsaios) || 0;
+
+      // 1. Recebido Por: date of insertion is b.recebidoEm
+      if (b.recebidoPor && b.recebidoPor.trim() !== '') {
+        const rName = b.recebidoPor.trim();
+        const rDate = b.recebidoEm ? b.recebidoEm.toDate() : (b.periodoInicial ? b.periodoInicial.toDate() : null);
+        const rInRange = rDate && (!startDate || rDate >= startDate) && (!endDate || startOfDay(rDate) <= endDate);
+
+        if (rInRange) {
+          if (!selectedCollab || rName === selectedCollab) {
+            if (!productivity[rName]) {
+              productivity[rName] = { recebido: 0, lido: 0, informado: 0, total: 0 };
+            }
+            productivity[rName].recebido += ensaios;
+            productivity[rName].total += ensaios;
+          }
         }
       }
 
-      // Track informing productivity
-      if (b.conferidoPor) {
-        if (!selectedCollab || b.conferidoPor === selectedCollab) {
-          if (!productivity[b.conferidoPor]) productivity[b.conferidoPor] = { lido: 0, informado: 0 };
-          productivity[b.conferidoPor].informado += b.numEnsaios;
+      // 2. Lido Por: date of insertion is b.lidoEm
+      if (b.lidoPor && b.lidoPor.trim() !== '') {
+        const lName = b.lidoPor.trim();
+        const lDate = b.lidoEm ? b.lidoEm.toDate() : (b.recebidoEm ? b.recebidoEm.toDate() : (b.periodoInicial ? b.periodoInicial.toDate() : null));
+        const lInRange = lDate && (!startDate || lDate >= startDate) && (!endDate || startOfDay(lDate) <= endDate);
+
+        if (lInRange) {
+          if (!selectedCollab || lName === selectedCollab) {
+            if (!productivity[lName]) {
+              productivity[lName] = { recebido: 0, lido: 0, informado: 0, total: 0 };
+            }
+            productivity[lName].lido += ensaios;
+            productivity[lName].total += ensaios;
+          }
         }
-        
-        // Quality stats counts (onTime vs late)
-        if (!selectedCollab || b.conferidoPor === selectedCollab) {
-          totalEnsaiosFinished += b.numEnsaios;
-          const deadline = addDays(b.periodoInicial.toDate(), 30);
-          if (isAfter(b.conferidoEm!.toDate(), deadline)) {
-            lateCount++;
-          } else {
-            onTimeCount++;
+      }
+
+      // 3. Informado Por: date of insertion is b.conferidoEm
+      if (b.conferidoPor && b.conferidoPor.trim() !== '') {
+        const cName = b.conferidoPor.trim();
+        const cDate = b.conferidoEm ? b.conferidoEm.toDate() : (b.recebidoEm ? b.recebidoEm.toDate() : (b.periodoInicial ? b.periodoInicial.toDate() : null));
+        const cInRange = cDate && (!startDate || cDate >= startDate) && (!endDate || startOfDay(cDate) <= endDate);
+
+        if (cInRange) {
+          if (!selectedCollab || cName === selectedCollab) {
+            if (!productivity[cName]) {
+              productivity[cName] = { recebido: 0, lido: 0, informado: 0, total: 0 };
+            }
+            productivity[cName].informado += ensaios;
+            productivity[cName].total += ensaios;
+
+            // Delivery Quality (tracked for batches informed/concluded in this period)
+            totalEnsaiosFinished += ensaios;
+            const periodoInicialDate = b.periodoInicial ? b.periodoInicial.toDate() : null;
+            const deadline = periodoInicialDate ? addDays(periodoInicialDate, 30) : null;
+            const isLate = (deadline && isAfter(cDate, deadline)) || b.ensaioForaDoPrazo;
+            if (isLate) {
+              lateCount++;
+            } else {
+              onTimeCount++;
+            }
+          }
+        }
+      } else {
+        // Open batch (not informed yet)
+        const rDate = b.recebidoEm ? b.recebidoEm.toDate() : (b.periodoInicial ? b.periodoInicial.toDate() : null);
+        const rInRange = rDate && (!startDate || rDate >= startDate) && (!endDate || startOfDay(rDate) <= endDate);
+        if (rInRange) {
+          if (!selectedCollab || (b.recebidoPor && b.recebidoPor.trim() === selectedCollab)) {
+            totalEnsaiosOpen += ensaios;
           }
         }
       }
@@ -5381,7 +5564,7 @@ function StatsPanel({ batches, collaborators, pacs, nonConformityRecords, isLoca
       totalEnsaiosFinished,
       totalEnsaiosOpen
     };
-  }, [filtered, selectedCollab]);
+  }, [batches, selectedCollab, statsStartDate, statsEndDate]);
 
   return (
     <div className="space-y-8 animate-in fade-in duration-200">
@@ -5560,35 +5743,63 @@ function StatsPanel({ batches, collaborators, pacs, nonConformityRecords, isLoca
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Productivity by Collaborator x Activity */}
         <div className="lg:col-span-2 bg-white rounded-[32px] p-8 border border-[#e5e5e0]">
-          <div className="flex items-center gap-3 mb-6">
-            <BarChart3 className="text-[#5A5A40]" size={24} />
-            <h3 className="text-xl font-display font-bold tracking-tight">Produtividade por Atividade</h3>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-6">
+            <div className="flex items-center gap-3">
+              <BarChart3 className="text-[#5A5A40]" size={24} />
+              <div>
+                <h3 className="text-xl font-display font-bold tracking-tight">Produtividade por Atividade</h3>
+                <p className="text-xs text-[#5A5A40]/70 mt-0.5">
+                  Apuração baseada na data de inserção de cada colaborador (Recebido em, Lido em e Informado em).
+                </p>
+              </div>
+            </div>
+            {selectedCollab && (
+              <span className="text-xs font-bold text-gray-500 bg-gray-100 px-3 py-1.5 rounded-xl self-start sm:self-auto">
+                Filtrado: <strong className="text-gray-900">{selectedCollab}</strong>
+              </span>
+            )}
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left">
               <thead>
                 <tr className="text-[10px] uppercase font-bold text-[#5A5A40] opacity-50 border-b border-[#e5e5e0]">
                   <th className="pb-4">Colaborador</th>
+                  <th className="pb-4 text-center">Ensaios Recebidos</th>
                   <th className="pb-4 text-center">Ensaios Lidos</th>
                   <th className="pb-4 text-center">Ensaios Informados</th>
+                  <th className="pb-4 text-center">Total Produzido</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#f5f5f0]">
                 {computedStats.productivity.map(([name, data]: [string, any]) => (
                   <tr key={name} className="group hover:bg-[#f5f5f0]/50 transition-colors">
-                    <td className="py-4 font-medium">{name}</td>
+                    <td className="py-4 font-semibold text-gray-900 text-sm">{name}</td>
                     <td className="py-4 text-center">
-                      <span className="px-2 py-1 bg-blue-50 text-blue-700 rounded-lg text-xs font-bold">{data.lido}</span>
+                      <span className="px-2.5 py-1 bg-amber-50 text-amber-800 rounded-lg text-xs font-bold">
+                        {data.recebido || 0}
+                      </span>
                     </td>
                     <td className="py-4 text-center">
-                      <span className="px-2 py-1 bg-emerald-50 text-emerald-700 rounded-lg text-xs font-bold">{data.informado}</span>
+                      <span className="px-2.5 py-1 bg-blue-50 text-blue-700 rounded-lg text-xs font-bold">
+                        {data.lido || 0}
+                      </span>
+                    </td>
+                    <td className="py-4 text-center">
+                      <span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 rounded-lg text-xs font-bold">
+                        {data.informado || 0}
+                      </span>
+                    </td>
+                    <td className="py-4 text-center">
+                      <span className="px-2.5 py-1 bg-[#5A5A40]/10 text-[#5A5A40] rounded-lg text-xs font-extrabold">
+                        {data.total || 0}
+                      </span>
                     </td>
                   </tr>
                 ))}
                 {computedStats.productivity.length === 0 && (
                   <tr>
                     <td colSpan={5} className="py-8 text-center text-sm text-[#5A5A40] opacity-60 italic">
-                      Nenhuma atividade registrada ainda para este período / filtro.
+                      Nenhuma atividade registrada para este período / filtro.
                     </td>
                   </tr>
                 )}
